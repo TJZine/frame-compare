@@ -1673,6 +1673,92 @@ def test_review_notes_persist_and_import_replaces(tmp_path: Path) -> None:
     )
 
 
+@pytest.mark.integration
+def test_review_import_keeps_session_warning_after_storage_quota(tmp_path: Path) -> None:
+    browser = _browser_executable()
+    if browser is None:
+        pytest.skip("Chrome/Chromium is unavailable")
+    report_path = _generated_report(tmp_path, frames=(10, 11))
+    script = _viewer_input_script(
+        r"""
+        const note = "document.querySelector('[data-review-note]')";
+        const status = "document.querySelector('[data-review-status]')";
+        const warning = 'Changes are kept only for this session. Export review JSON to keep them.';
+        const openReview = `(() => {
+            document.getElementById('btn-inspector').click();
+            document.getElementById('inspector-tab-review').click();
+        })()`;
+        await evaluate(openReview);
+        await evaluate(`${note}.focus()`);
+        await command('Input.insertText', { text: 'On disk' });
+        const savedNote = "Object.entries(localStorage).find(([key]) => key.startsWith('frame-compare:report-review:'))[1]";
+        const savedBytes = await evaluate(savedNote);
+        assert.equal(JSON.parse(savedBytes).reviews[0].note, 'On disk');
+
+        await evaluate(`(() => {
+            let used = 0;
+            for (let step = 16 * 1024 * 1024; step >= 1; step /= 2) {
+                try {
+                    localStorage.setItem('quota-fixture', 'x'.repeat(used + step));
+                    used += step;
+                } catch (error) {
+                    if (error.name !== 'QuotaExceededError') throw error;
+                }
+            }
+        })()`);
+        await evaluate(`${note}.select()`);
+        await command('Input.insertText', { text: 'Only in this session' });
+        assert.equal(await evaluate(`${status}.textContent`), warning);
+
+        const { root } = await command('DOM.getDocument');
+        const { nodeId } = await command('DOM.querySelector', {
+            nodeId: root.nodeId, selector: '[data-review-import]',
+        });
+        await command('Page.enable');
+        const dismissed = new Promise((resolve, reject) => {
+            const onDialog = event => {
+                const message = JSON.parse(event.data);
+                if (message.method !== 'Page.javascriptDialogOpening') return;
+                socket.removeEventListener('message', onDialog);
+                command('Page.handleJavaScriptDialog', { accept: false }).then(
+                    () => resolve(message.params.type), reject,
+                );
+            };
+            socket.addEventListener('message', onDialog);
+        });
+        const observations = [];
+        for (const [name, bytes, outcome] of [
+            ['stored.json', savedBytes, 'Import cancelled. No changes were made.'],
+            ['invalid.json', '{bad', 'Import is not valid JSON. No changes were made.'],
+        ]) {
+            const file = path.join(path.dirname(profile), name);
+            await fs.writeFile(file, bytes);
+            await command('DOM.setFileInputFiles', { nodeId, files: [file] });
+            if (name === 'stored.json') assert.equal(await dismissed, 'confirm');
+            await waitFor(`${status}.textContent.startsWith(${JSON.stringify(outcome)})`, outcome);
+            observations.push(await evaluate(`[${status}.textContent, ${status}.dataset.tone]`));
+            await evaluate("document.getElementById('btn-next').click()");
+            assert.equal(await evaluate(`${note}.value`), '');
+            await evaluate("document.getElementById('btn-prev').click()");
+            assert.equal(await evaluate(`${note}.value`), 'Only in this session');
+            assert.equal(await evaluate(savedNote), savedBytes);
+        }
+        assert.deepEqual(observations, [
+            [`Import cancelled. No changes were made. ${warning}`, 'warning'],
+            [`Import is not valid JSON. No changes were made. ${warning}`, 'warning'],
+        ]);
+        const beforeReload = await evaluate('performance.timeOrigin');
+        await command('Page.reload');
+        await waitFor(
+            `performance.timeOrigin !== ${beforeReload} && ${note}?.value === 'On disk'`,
+            'reload did not restore the last saved note',
+        );
+"""
+    )
+    result = _run_browser_input(browser, report_path, tmp_path / "chrome-quota-profile", script)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def _viewer_input_script(actions: str) -> str:
     """Use the trusted-input CDP driver for loaded-viewer assertions."""
     return (

@@ -237,21 +237,13 @@ const ReviewState = (() => {
         let renderedFrameOrdinal = null;
         let initialWarningPending = Boolean(model.status().warning);
 
-        function showMessage(message, warning = false, announce = true) {
+        function showStatus({ action = '', error = false, announce = true } = {}) {
+            const { warning, count } = model.status();
+            const message = [action, warning].filter(Boolean).join(' ')
+                || `${count} review record${count === 1 ? '' : 's'} saved in this browser.`;
             viewer.setText(viewer.dom.reviewStatus, message);
-            viewer.dom.reviewStatus.dataset.tone = warning ? 'warning' : 'saved';
+            viewer.dom.reviewStatus.dataset.tone = error || warning ? 'warning' : 'saved';
             if (announce) viewer.announce(message);
-        }
-
-        function showActionMessage(message, isError = false) {
-            const { warning } = model.status();
-            showMessage(warning ? `${message} ${warning}` : message, isError || Boolean(warning));
-        }
-
-        function updateStatus(announce = false) {
-            const status = model.status();
-            const saved = `${status.count} review record${status.count === 1 ? '' : 's'} saved in this browser.`;
-            showMessage(status.warning || saved, Boolean(status.warning), announce);
         }
 
         function render(options = {}) {
@@ -267,7 +259,7 @@ const ReviewState = (() => {
             viewer.dom.reviewNote.value = record.note;
             viewer.setText(viewer.dom.reviewNoteCount, `${scalarLength(record.note)} / ${MAX_NOTE_SCALARS}`);
             viewer.dom.reviewPreferred.value = record.preferred_clip_id || '';
-            updateStatus(initialWarningPending);
+            showStatus({ announce: initialWarningPending });
             initialWarningPending = false;
         }
 
@@ -281,10 +273,11 @@ const ReviewState = (() => {
 
         function mutate(patch) {
             try {
-                updateStatus(!model.mutate(viewer.state.currentFrameIdx, patch));
+                const saved = model.mutate(viewer.state.currentFrameIdx, patch);
+                showStatus({ announce: !saved });
             } catch (error) {
                 render({ force: true });
-                showActionMessage(error.message, true);
+                showStatus({ action: error.message, error: true });
             }
         }
 
@@ -297,9 +290,9 @@ const ReviewState = (() => {
                 link.download = `${viewer.state.data.report_id}-review.json`;
                 link.click();
                 window.setTimeout(() => URL.revokeObjectURL(url), 0);
-                showActionMessage('Review JSON exported.');
+                showStatus({ action: 'Review JSON exported.' });
             } catch (error) {
-                showActionMessage(error.message, true);
+                showStatus({ action: error.message, error: true });
             }
         }
 
@@ -321,18 +314,18 @@ const ReviewState = (() => {
                     if (!window.confirm(
                         `Replace ${count} saved review ${savedLabel} with ${imported.length} imported ${importedLabel}?`,
                     )) {
-                        showActionMessage('Import cancelled. No changes were made.');
+                        showStatus({ action: 'Import cancelled. No changes were made.' });
                         return;
                     }
                 }
                 model.replaceAll(imported);
                 render({ force: true });
-                showActionMessage('Review import applied.');
+                showStatus({ action: 'Review import applied.' });
             } catch (error) {
                 if (generation !== importGeneration) return;
                 const message = error.message || String(error);
                 const suffix = message.includes('No changes were made.') ? '' : ' No changes were made.';
-                showActionMessage(message + suffix, true);
+                showStatus({ action: message + suffix, error: true });
             } finally {
                 if (generation === importGeneration) input.value = '';
             }
