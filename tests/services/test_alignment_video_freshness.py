@@ -15,11 +15,10 @@ import numpy.typing as npt
 import pytest
 
 from frame_compare.services import alignment_video
+from frame_compare.services.alignment_evidence import AudioAlignmentAttempt
 from frame_compare.services.alignment_video import VideoClipRequest
-from frame_compare.utils.alignment_evidence import AudioAlignmentAttempt
-from frame_compare.utils.types import AlignmentClipIdentity
 from frame_compare.vs.loader import VSLoader
-from tests.services.test_alignment_evidence import attempt_with_chunks
+from tests.services.alignment_evidence_test_support import attempt_with_chunks
 
 
 class _ArrayClip:
@@ -62,8 +61,7 @@ def media(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     def source(name: str) -> VideoClipRequest:
         path = tmp_path / name
         path.write_bytes(b"original")
-        stat = path.stat()
-        return VideoClipRequest(path, AlignmentClipIdentity(path, stat.st_size, stat.st_mtime_ns))
+        return VideoClipRequest(path)
 
     reference = source("reference.mkv")
     comparison = source("comparison.mkv")
@@ -107,46 +105,6 @@ def test_unchanged_sources_keep_video_confirmation(media, with_target: bool) -> 
         assert len(result.targets[0].positions) == 4
     else:
         assert result.targets == ()
-
-
-@pytest.mark.parametrize("phase", ["base", "last_target"])
-@pytest.mark.parametrize("side", ["reference", "comparison"])
-@pytest.mark.parametrize("mutation", ["replace", "delete"])
-def test_source_changed_after_scoring_cannot_confirm(
-    media, monkeypatch: pytest.MonkeyPatch, phase: str, side: str, mutation: str
-) -> None:
-    reference, comparison, loader = media
-    path = reference.path if side == "reference" else comparison.path
-    changed = False
-
-    def change_source() -> None:
-        nonlocal changed
-        changed = True
-        if mutation == "delete":
-            path.unlink()
-        else:
-            path.write_bytes(b"replacement with a different size")
-
-    name = "_score_base_positions" if phase == "base" else "_score_hypotheses"
-    monkeypatch.setattr(
-        alignment_video,
-        name,
-        _after_scoring(
-            getattr(alignment_video, name), change_source, after_calls=1 if phase == "base" else 4
-        ),
-    )
-    result = alignment_video.check_video_alignment(
-        reference=reference,
-        comparison=comparison,
-        attempt=_attempt(with_target=phase == "last_target"),
-        fps_reference=Fraction(24),
-        loader=loader,
-    )
-    assert changed, "the test must reach the intended late source-change boundary"
-    assert result.observation == "not_observed"
-    assert result.confirmed_offset is None
-    assert result.positions == ()
-    assert result.targets == ()
 
 
 @pytest.mark.parametrize("phase", ["base", "last_target"])

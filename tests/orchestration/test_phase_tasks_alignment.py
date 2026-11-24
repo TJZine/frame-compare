@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
+from time import monotonic
 from typing import Any, cast
 
 import pytest
@@ -17,17 +19,30 @@ from frame_compare.analysis.types import (
 )
 from frame_compare.analysis.window import SelectionWindow
 from frame_compare.orchestration import phase_alignment, phase_selection
-from frame_compare.orchestration.full_window_retry import FullWindowRetryOverride
+from frame_compare.orchestration.execution import RunSteps, run_output_steps, run_selection_steps
+from frame_compare.orchestration.execution_types import ExecutionState
+from frame_compare.orchestration.full_window_retry import (
+    FullWindowRetryOverride,
+    compute_selection_window_with_recovery,
+)
+from frame_compare.orchestration.types import RunDependencies
+from frame_compare.services.alignment_evidence import AlignmentStabilitySummary
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentOperationOutcome, AlignmentResult
-from frame_compare.utils.alignment_evidence import AlignmentStabilitySummary
+from frame_compare.utils.progress import NullProgressReporter
 from frame_compare.utils.types import AlignmentRequest
+from tests.orchestration.execute_run_helpers import (
+    FakeVSLoader,
+    install_fake_frame_render,
+)
 from tests.orchestration.phase_task_helpers import (
     _clip,
     _context,
     _frame_metrics,
     _run_align_phase,
+    prep_for_context,
 )
+from tests.run_request_support import make_run_request
 
 
 def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
@@ -88,7 +103,9 @@ def test_run_align_phase_applies_offsets_and_normalizes_selected_frames(
     assert alignment_request.shared_alignment_cache_dir == ctx.workspace.shared_alignment_cache_dir
     assert alignment_request.reference.identity.path == ctx.reference.probe.fingerprint.path
     assert alignment_request.comparisons[0].identity.path == comparison.probe.fingerprint.path
-    assert captured["reference_fps"] == ctx.reference.effective_fps
+    assert "reference_fps" not in captured
+    assert alignment_request.reference.effective_fps_num == ctx.reference.effective_fps.numerator
+    assert alignment_request.reference.effective_fps_den == ctx.reference.effective_fps.denominator
     assert captured["frame_props_by_stem"] == {
         "reference": {"_Matrix": 1, "_Transfer": 1, "_Primaries": 1},
         "encode": {"_Matrix": 1, "_Transfer": 16, "_Primaries": 9},
@@ -381,8 +398,7 @@ def test_run_align_phase_composes_global_source_trims(
     assert output.selected_frames == expected_frames
     if warns:
         assert len(output.warnings) == 1
-        assert "align: Encode B alignment" in output.warnings[0].text
-        assert "encode_b" not in output.warnings[0].text
+        assert "encode_b: alignment not applied" in output.warnings[0].text
         assert output.reference.alignment is None
 
 
@@ -419,7 +435,7 @@ def test_run_align_phase_does_not_backfill_dropped_user_frames_with_random(
     assert output.reference.trim.trim_start_frames == 2
     assert output.selected_frames == [48]
     assert [warning.text for warning in output.warnings] == [
-        "frame selection: dropped user frame(s) outside aligned renderable range: 0"
+        "1 requested frame falls outside the shared range and was skipped: 0"
     ]
 
 
@@ -431,9 +447,12 @@ def test_run_align_phase_does_not_substitute_after_full_window_retry(
     ctx.config.analysis = ctx.config.analysis.model_copy(
         update={"user_frames": [0], "random_frame_count": 1, "random_seed": 42}
     )
-    ctx.full_window_retry_override = FullWindowRetryOverride(
-        ignore_lead_seconds=2.0,
-        ignore_trail_seconds=2.0,
+    ctx.selection_domain = replace(
+        ctx.selection_domain,
+        full_window_retry_override=FullWindowRetryOverride(
+            ignore_lead_seconds=2.0,
+            ignore_trail_seconds=2.0,
+        ),
     )
 
     monkeypatch.setattr(
@@ -469,7 +488,10 @@ def test_run_align_phase_reselects_trimmed_overlap_when_fallback_plan_would_drop
         ctx.reference,
         probe=replace(ctx.reference.probe, num_frames=220),
     )
-    ctx.selection_window = SelectionWindow(start_frame=0, end_frame_exclusive=220)
+    ctx.selection_domain = replace(
+        ctx.selection_domain,
+        selection_window=SelectionWindow(start_frame=0, end_frame_exclusive=220),
+    )
     ctx.config.analysis = ctx.config.analysis.model_copy(
         update={
             "random_frame_count": 0,
@@ -478,12 +500,15 @@ def test_run_align_phase_reselects_trimmed_overlap_when_fallback_plan_would_drop
             "dark_quantile": 0.2,
         }
     )
-    ctx.analysis_metrics = _frame_metrics(
-        luminance=[float(frame) / 219.0 for frame in range(220)],
-        motion=[0.0 for _ in range(220)],
-        frame_count=220,
-        fps=Fraction(60, 1),
-        clips=[ClipIdentity(path="reference.mkv", size=1, mtime=1.0)],
+    ctx.selection = replace(
+        ctx.selection,
+        analysis_metrics=_frame_metrics(
+            luminance=[float(frame) / 219.0 for frame in range(220)],
+            motion=[0.0 for _ in range(220)],
+            frame_count=220,
+            fps=Fraction(60, 1),
+            clips=[ClipIdentity(path="reference.mkv", size=1, mtime=1.0)],
+        ),
     )
     selected_frames = [0, 1, 2, 3]
 
@@ -532,16 +557,19 @@ def test_run_align_phase_filters_and_rebases_sparse_metrics_for_overlap(
     ctx.config.analysis = ctx.config.analysis.model_copy(
         update={"random_frame_count": 0, "dark_frame_count": 2}
     )
-    ctx.analysis_metrics = _frame_metrics(
-        luminance=[0.9, 0.8, 0.4, 0.1, 0.2],
-        motion=[0.1, 0.1, 0.2, 0.3, 0.4],
-        frame_count=5,
-        fps=Fraction(24),
-        source_frame_count=220,
-        metric_source_start=0,
-        metric_source_end_exclusive=220,
-        performance_mode="performance",
-        sampled_source_frames=(10, 20, 65, 75, 90),
+    ctx.selection = replace(
+        ctx.selection,
+        analysis_metrics=_frame_metrics(
+            luminance=[0.9, 0.8, 0.4, 0.1, 0.2],
+            motion=[0.1, 0.1, 0.2, 0.3, 0.4],
+            frame_count=5,
+            fps=Fraction(24),
+            source_frame_count=220,
+            metric_source_start=0,
+            metric_source_end_exclusive=220,
+            performance_mode="performance",
+            sampled_source_frames=(10, 20, 65, 75, 90),
+        ),
     )
 
     def _fake_align_clips_from_request(
@@ -584,16 +612,19 @@ def test_run_align_phase_sparse_overlap_reports_metric_candidate_underfill(
     ctx.config.analysis = ctx.config.analysis.model_copy(
         update={"random_frame_count": 0, "dark_frame_count": 2}
     )
-    ctx.analysis_metrics = _frame_metrics(
-        luminance=[0.1, 0.2],
-        motion=[0.1, 0.2],
-        frame_count=2,
-        fps=Fraction(24),
-        source_frame_count=220,
-        metric_source_start=0,
-        metric_source_end_exclusive=220,
-        performance_mode="performance",
-        sampled_source_frames=(10, 100),
+    ctx.selection = replace(
+        ctx.selection,
+        analysis_metrics=_frame_metrics(
+            luminance=[0.1, 0.2],
+            motion=[0.1, 0.2],
+            frame_count=2,
+            fps=Fraction(24),
+            source_frame_count=220,
+            metric_source_start=0,
+            metric_source_end_exclusive=220,
+            performance_mode="performance",
+            sampled_source_frames=(10, 100),
+        ),
     )
 
     def _fake_align_clips_from_request(
@@ -633,12 +664,15 @@ def test_run_align_phase_raises_when_overlap_is_smaller_than_generated_counts(
     ctx.config.analysis = ctx.config.analysis.model_copy(
         update={"random_frame_count": 0, "dark_frame_count": 2, "bright_frame_count": 2}
     )
-    ctx.analysis_metrics = _frame_metrics(
-        luminance=[float(frame) / 99.0 for frame in range(100)],
-        motion=[0.0 for _ in range(100)],
-        frame_count=100,
-        fps=Fraction(24, 1),
-        clips=[ClipIdentity(path="reference.mkv", size=1, mtime=1.0)],
+    ctx.selection = replace(
+        ctx.selection,
+        analysis_metrics=_frame_metrics(
+            luminance=[float(frame) / 99.0 for frame in range(100)],
+            motion=[0.0 for _ in range(100)],
+            frame_count=100,
+            fps=Fraction(24, 1),
+            clips=[ClipIdentity(path="reference.mkv", size=1, mtime=1.0)],
+        ),
     )
 
     def _fake_align_clips_from_request(
@@ -678,12 +712,15 @@ def test_run_align_phase_preserves_surviving_user_label_when_metrics_reselect_sa
     ctx.config.analysis = ctx.config.analysis.model_copy(
         update={"user_frames": [98], "random_frame_count": 0, "dark_frame_count": 1}
     )
-    ctx.analysis_metrics = _frame_metrics(
-        luminance=[float(frame) / 99.0 for frame in range(100)],
-        motion=[0.0 for _ in range(100)],
-        frame_count=100,
-        fps=Fraction(24, 1),
-        clips=[ClipIdentity(path="reference.mkv", size=1, mtime=1.0)],
+    ctx.selection = replace(
+        ctx.selection,
+        analysis_metrics=_frame_metrics(
+            luminance=[float(frame) / 99.0 for frame in range(100)],
+            motion=[0.0 for _ in range(100)],
+            frame_count=100,
+            fps=Fraction(24, 1),
+            clips=[ClipIdentity(path="reference.mkv", size=1, mtime=1.0)],
+        ),
     )
 
     def _fake_align_clips_from_request(
@@ -726,24 +763,33 @@ def test_run_align_phase_fallback_reselects_only_inside_global_selection_window(
         tmp_path / "comparison_videos" / "encode.mkv", label="Encode 1", num_frames=220
     )
     ctx = _context(tmp_path, comparisons=[comparison])
-    ctx.selection_window = SelectionWindow(start_frame=80, end_frame_exclusive=140)
-    ctx.analysis_clip = _clip(
-        tmp_path / "comparison_videos" / "analysis.mkv",
-        label="Analysis",
-        num_frames=220,
-    ).with_trim(trim_start_frames=20, trim_end_frame_inclusive=219)
+    ctx.selection_domain = replace(
+        ctx.selection_domain,
+        selection_window=SelectionWindow(start_frame=80, end_frame_exclusive=140),
+    )
+    ctx.selection_domain = replace(
+        ctx.selection_domain,
+        analysis_clip=_clip(
+            tmp_path / "comparison_videos" / "analysis.mkv",
+            label="Analysis",
+            num_frames=220,
+        ).with_trim(trim_start_frames=20, trim_end_frame_inclusive=219),
+    )
     ctx.config.analysis = ctx.config.analysis.model_copy(
         update={"random_frame_count": 0, "dark_frame_count": 2, "bright_frame_count": 2}
     )
-    ctx.analysis_metrics = _frame_metrics(
-        luminance=[float(frame) / 219.0 for frame in range(100, 160)],
-        motion=[0.0 for _ in range(60)],
-        frame_count=60,
-        fps=Fraction(24, 1),
-        clips=[ClipIdentity(path="reference.mkv", size=1, mtime=1.0)],
-        source_frame_count=220,
-        metric_source_start=100,
-        metric_source_end_exclusive=160,
+    ctx.selection = replace(
+        ctx.selection,
+        analysis_metrics=_frame_metrics(
+            luminance=[float(frame) / 219.0 for frame in range(100, 160)],
+            motion=[0.0 for _ in range(60)],
+            frame_count=60,
+            fps=Fraction(24, 1),
+            clips=[ClipIdentity(path="reference.mkv", size=1, mtime=1.0)],
+            source_frame_count=220,
+            metric_source_start=100,
+            metric_source_end_exclusive=160,
+        ),
     )
 
     def _fake_align_clips_from_request(
@@ -777,18 +823,27 @@ def test_run_align_phase_fallback_reselects_only_inside_global_selection_window(
     assert all(80 <= frame < 140 for frame in selected_source_frames)
 
 
+@pytest.mark.parametrize(
+    ("offset", "accepted_retry"),
+    [
+        pytest.param(100, False, id="ordinary-empty-overlap"),
+        pytest.param(100, True, id="retry-empty-overlap"),
+        pytest.param(10, True, id="retry-empty-window-intersection"),
+    ],
+)
 def test_run_align_phase_raises_when_alignment_leaves_no_overlap(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offset: int, accepted_retry: bool
 ) -> None:
+    recorded = install_fake_frame_render(monkeypatch)
     comparison = _clip(
         tmp_path / "comparison_videos" / "encode.mkv",
         label="Encode 1",
         num_frames=2,
     )
     ctx = _context(tmp_path, comparisons=[comparison])
-    selected_frames = [0, 1]
+    comparison.path.touch()
 
-    def _fake_align_clips_from_request(
+    async def _fake_align_clips_from_request(
         *_args: object, **_kwargs: object
     ) -> AlignmentOperationOutcome:
         return AlignmentOperationOutcome(
@@ -796,8 +851,8 @@ def test_run_align_phase_raises_when_alignment_leaves_no_overlap(
                 AlignmentResult(
                     reference_clip="reference.mkv",
                     comparison_clip="encode.mkv",
-                    frame_offset=100,
-                    time_offset_seconds=4.0,
+                    frame_offset=offset,
+                    time_offset_seconds=offset / 24,
                     correlation_score=0.9,
                     algorithm="cross_correlation",
                     source="computed",
@@ -807,8 +862,42 @@ def test_run_align_phase_raises_when_alignment_leaves_no_overlap(
 
     monkeypatch.setattr(phase_alignment, "align_clips_from_request", _fake_align_clips_from_request)
 
-    with pytest.raises(AudioAlignmentError, match="No overlapping frames"):
-        _run_align_phase(ctx, selected_frames=selected_frames)
+    if not accepted_retry:
+        with pytest.raises(AudioAlignmentError, match="No overlapping frames"):
+            _run_align_phase(ctx, selected_frames=[0, 1])
+        return
+
+    ctx.config.analysis.random_frame_count = 1
+    ctx.config.analysis.ignore_lead_seconds = 1.0
+    ctx.config.analysis.min_window_seconds = 0.0
+    selection_state = compute_selection_window_with_recovery(
+        clips=[ctx.reference, comparison], config=ctx.config, confirm=lambda request: "confirmed"
+    )
+    assert selection_state.override is not None
+    ctx.config = selection_state.config
+    ctx.selection_domain = replace(
+        ctx.selection_domain,
+        selection_window=selection_state.selection_window,
+        full_window_retry_override=selection_state.override,
+    )
+    request = make_run_request(root=tmp_path, skip_metadata=True)
+    state = ExecutionState()
+    prep = prep_for_context(ctx, state)
+    deps = RunDependencies(vs_loader=FakeVSLoader())
+    steps = RunSteps(reporter=NullProgressReporter(), state=state, monotonic_timer=monotonic)
+
+    async def run() -> None:
+        await run_selection_steps(ctx, steps, request=request, prep=prep, state=state, deps=deps)
+        await run_output_steps(ctx, steps, request=request, prep=prep, state=state, deps=deps)
+
+    with pytest.raises(ExclusionRecoverySelectionError, match="full-window retry") as caught:
+        asyncio.run(run())
+
+    assert caught.value.context.code == "FC-4012"
+    assert isinstance(caught.value.__cause__, AudioAlignmentError)
+    assert "render" not in state.phase_timings
+    assert state.artifacts.render is None
+    assert recorded == []
 
 
 def test_run_align_phase_preserves_accepted_alignment_when_another_result_is_rejected(
@@ -842,7 +931,7 @@ def test_run_align_phase_preserves_accepted_alignment_when_another_result_is_rej
                     algorithm="cross_correlation",
                     source="computed",
                     applied=False,
-                    diagnostic="low_confidence",
+                    diagnostic="video_check_inconclusive",
                 ),
             )
         )
@@ -856,15 +945,12 @@ def test_run_align_phase_preserves_accepted_alignment_when_another_result_is_rej
     assert [comparison.trim.trim_start_frames for comparison in output.comparisons] == [0, 2]
     assert output.selected_frames == [0, 48, 97]
     assert len(output.warnings) == 1
-    warning = output.warnings[0].text
-    normalized_warning = warning.replace("_", " ").lower()
-    assert "align:" in warning.lower()
-    assert "align: Encode B alignment" in warning
-    assert "encode_b" not in warning
-    assert "low confidence" in normalized_warning
-    assert "unapplied" in normalized_warning
-    assert "best-effort reference-frame domain" in warning
-    assert "without accepted alignment" in warning
+    warning = output.warnings[0]
+    assert warning.comparison_path == comp_b.path
+    assert warning.text == (
+        "encode_b: alignment not applied (video check was inconclusive); "
+        "frames use the reference's frame numbers."
+    )
 
 
 @pytest.mark.parametrize(

@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from fractions import Fraction
 from math import ceil
 
-from frame_compare.analysis.errors import SelectionError
+from frame_compare.analysis.errors import SelectionError, SelectionFailureKind
 from frame_compare.analysis.types import (
     FrameMetrics,
     FrameSelection,
@@ -61,7 +61,12 @@ def select_frames(
 
     total_frames = metrics.eligible_frame_count
     if total_frames == 0:
-        raise SelectionError(reason="empty_metrics", requested=_requested_count(config), found=0)
+        raise SelectionError(
+            reason="empty_metrics",
+            requested=config.requested_frame_count,
+            found=0,
+            kind=SelectionFailureKind.EMPTY_METRICS,
+        )
 
     seed = config.random_seed
     effective_selection_fps = metrics.metadata.fps if selection_fps is None else selection_fps
@@ -125,13 +130,14 @@ def select_frames(
     )
 
     selected_list = sorted(selected_set)
-    requested_count = _requested_count(config, accepted_user_frame_count=len(user_frames))
+    requested_count = config.generated_frame_count + len(user_frames)
 
     if len(selected_list) < requested_count:
         raise SelectionError(
             reason="insufficient_candidates",
             requested=requested_count,
             found=len(selected_list),
+            kind=SelectionFailureKind.INSUFFICIENT_METRIC_CANDIDATES,
         )
 
     return FrameSelection(
@@ -143,24 +149,6 @@ def select_frames(
             breakdown=breakdown,
             fps=effective_selection_fps,
         ),
-    )
-
-
-def _requested_count(
-    config: AnalysisConfig,
-    *,
-    accepted_user_frame_count: int | None = None,
-) -> int:
-    return (
-        (
-            len(config.user_frames)
-            if accepted_user_frame_count is None
-            else accepted_user_frame_count
-        )
-        + config.random_frame_count
-        + config.dark_frame_count
-        + config.bright_frame_count
-        + config.motion_frame_count
     )
 
 

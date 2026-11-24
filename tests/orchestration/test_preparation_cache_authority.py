@@ -1,0 +1,352 @@
+"""Persisted probe facts require current, strong source and runtime authority."""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import sys
+import tomllib
+from collections.abc import Iterator
+from dataclasses import replace
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+import tomli_w
+
+import frame_compare.orchestration.probing.probe_cache as probe_cache
+import frame_compare.vs.source_admission as admission
+from frame_compare.analysis.errors import MetricsCalculationError
+from frame_compare.orchestration import preparation
+from frame_compare.orchestration.phase_render import _source_signal_facts
+from frame_compare.orchestration.types import RunDependencies
+from frame_compare.utils.media_facts import HDRStaticFacts, SourceSignalFacts
+from frame_compare.vs.errors import SourceLoadError
+from frame_compare.vs.types import HDRMetadata, SourceInfo
+from tests.orchestration.execute_run_helpers import FakeHDRVSLoader, FakeVSLoader
+from tests.orchestration.preparation_test_support import (
+    METRIC_CONFIG,
+    create_config,
+    create_video_files,
+)
+from tests.run_request_support import make_run_request
+
+
+class RecordingLoader(FakeVSLoader):
+    def __init__(self, *, hdr: bool = False) -> None:
+        self.calls = 0
+        self.hdr = hdr
+
+    def load(self, path: Path) -> SourceInfo:
+        self.calls += 1
+        source = super().load(path)
+        if not self.hdr:
+            return replace(source, width=1280, height=720, frame_props={"_Transfer": 1})
+        return replace(
+            source,
+            is_hdr=True,
+            hdr_metadata=HDRMetadata(
+                mastering_display="fixture",
+                max_cll=1000,
+                max_fall=400,
+                color_primaries=9,
+                transfer=16,
+                matrix=9,
+            ),
+            frame_props={"_Transfer": 16, "DolbyVisionRPU": b"rpu"},
+        )
+
+
+def _run(root: Path, loader: FakeVSLoader):
+    return asyncio.run(
+        preparation.execute_prep(make_run_request(root=root), RunDependencies(vs_loader=loader))
+    )
+
+
+def _replace_same_stats(path: Path, *, in_place: bool) -> None:
+    before = path.stat()
+    if in_place:
+        path.write_bytes(b"other")
+    else:
+        replacement = path.with_name("replacement")
+        replacement.write_bytes(b"other")
+        replacement.replace(path)
+    os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+    assert path.stat().st_size == before.st_size
+    assert path.stat().st_mtime_ns == before.st_mtime_ns
+
+
+@pytest.mark.parametrize("in_place", [False, True], ids=["replacement", "in-place"])
+def test_same_size_and_mtime_replacement_invalidates_all_probe_facts(
+    tmp_path: Path, in_place: bool
+) -> None:
+    create_config(tmp_path, METRIC_CONFIG)
+    [path] = create_video_files(tmp_path / "comparison_videos", "source.mkv")
+    hdr_loader = RecordingLoader(hdr=True)
+    first = _run(tmp_path, hdr_loader).clips[0].probe
+    unchanged = _run(tmp_path, hdr_loader).clips[0].probe
+    assert hdr_loader.calls == 1
+    assert unchanged == first
+    assert first.fingerprint.source_token is not None
+    assert first.is_hdr and first.hdr_metadata is not None
+
+    _replace_same_stats(path, in_place=in_place)
+    sdr_loader = RecordingLoader()
+    current = _run(tmp_path, sdr_loader).clips[0].probe
+
+    assert sdr_loader.calls == 1
+    assert current.fingerprint.source_token != first.fingerprint.source_token
+    assert (current.width, current.height) == (1280, 720)
+    assert not current.is_hdr
+    assert current.hdr_metadata is None
+    assert current.preserved_frame_props == {"_Transfer": 1}
+
+
+@pytest.mark.parametrize("authority", ["stale", "private", "non-strict", "no-probe", "refused"])
+def test_cache_only_refuses_invalid_probe_authority_before_metadata_and_reservation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, authority: str
+) -> None:
+    create_config(tmp_path, METRIC_CONFIG)
+    [path] = create_video_files(tmp_path / "comparison_videos", "source.mkv")
+    _run(tmp_path, RecordingLoader())
+    if authority == "stale":
+        _replace_same_stats(path, in_place=True)
+    elif authority == "non-strict":
+        monkeypatch.setattr(probe_cache, "source_identity", MagicMock(side_effect=OSError))
+    elif authority == "no-probe":
+        monkeypatch.setattr(admission, "resolve_optional_executable", lambda _: None)
+    else:
+        original = admission.probe_admission_headers
+
+        def headers(*args, **kwargs):
+            streams, payload = original(*args, **kwargs)
+            payload["format"] = {"format_name": "mpegvideo" if authority == "private" else "concat"}
+            return streams, payload
+
+        monkeypatch.setattr(admission, "probe_admission_headers", headers)
+    reserve = MagicMock(side_effect=AssertionError("must validate before run metadata/reservation"))
+    monkeypatch.setattr(preparation, "_resolve_run_directory", reserve)
+    loader = RecordingLoader()
+    error_type = (
+        SourceLoadError if authority in {"no-probe", "refused"} else MetricsCalculationError
+    )
+    message = (
+        "Failed to load source"
+        if error_type is SourceLoadError
+        else "No cached analysis for this selection"
+    )
+    with pytest.raises(error_type, match=message) as caught:
+        asyncio.run(
+            preparation.execute_prep(
+                make_run_request(root=tmp_path, from_cache_only=True),
+                RunDependencies(vs_loader=loader),
+            )
+        )
+    if authority in {"no-probe", "refused"}:
+        assert caught.value.code == "FC-4015"
+        assert caught.value.hint == "Check file integrity or engine support"
+    assert loader.calls == 0
+    reserve.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "authority", ["non-strict", "private", "no-probe-identity", "unknown-coded"]
+)
+def test_admitted_private_sources_work_in_memory_without_persisted_reuse(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, authority: str
+) -> None:
+    create_config(tmp_path, METRIC_CONFIG)
+    create_video_files(tmp_path / "comparison_videos", "source.mkv")
+    if authority == "non-strict":
+        monkeypatch.setattr(probe_cache, "source_identity", MagicMock(side_effect=OSError))
+    elif authority == "no-probe-identity":
+        monkeypatch.setattr(admission, "_probe_stamp", lambda _: None)
+    else:
+        original = admission.probe_admission_headers
+
+        def headers(*args, **kwargs):
+            streams, payload = original(*args, **kwargs)
+            if authority == "private":
+                payload["format"] = {"format_name": "mpegvideo"}
+            else:
+                streams[0].update(coded_width=0, coded_height=0)
+            return streams, payload
+
+        monkeypatch.setattr(admission, "probe_admission_headers", headers)
+    loader = RecordingLoader()
+    for _ in range(2):
+        prep = _run(tmp_path, loader)
+        assert prep.clips[0].probe.fingerprint.source_token is None
+        assert prep.clips[0].probe.width == 1280
+        assert (
+            probe_cache.load_clip_probe_cache(prep.workspace.generated_dir / "clip_probe.toml")
+            == {}
+        )
+    assert loader.calls == 2
+    assert probe_cache.load_clip_probe_cache(tmp_path / "generated" / "clip_probe.toml") == {}
+
+
+@pytest.mark.parametrize("cache_only", [False, True], ids=["ordinary", "cache-only"])
+@pytest.mark.parametrize("token", [None, "malformed"], ids=["legacy-missing-token", "bad-token"])
+def test_untrusted_persisted_token_misses_at_both_preparation_entrypoints(
+    tmp_path: Path, cache_only: bool, token: str | None
+) -> None:
+    create_config(tmp_path, METRIC_CONFIG)
+    create_video_files(tmp_path / "comparison_videos", "source.mkv")
+    _run(tmp_path, RecordingLoader(hdr=True))
+    cache_path = tmp_path / "generated" / "clip_probe.toml"
+    payload = tomllib.loads(cache_path.read_text(encoding="utf-8"))
+    for key, entry in payload.items():
+        if key == "version":
+            continue
+        if token is None:
+            entry.pop("source_token")
+        else:
+            entry["source_token"] = token
+    cache_path.write_text(tomli_w.dumps(payload), encoding="utf-8")
+    loader = RecordingLoader()
+    if cache_only:
+        with pytest.raises(MetricsCalculationError, match="No cached analysis for this selection"):
+            asyncio.run(
+                preparation.execute_prep(
+                    make_run_request(root=tmp_path, from_cache_only=True),
+                    RunDependencies(vs_loader=loader),
+                )
+            )
+        assert loader.calls == 0
+    else:
+        probe = _run(tmp_path, loader).clips[0].probe
+        assert loader.calls == 1
+        assert not probe.is_hdr and probe.hdr_metadata is None
+        assert probe.preserved_frame_props == {"_Transfer": 1}
+
+
+@pytest.fixture
+def probe_workspace(tmp_path: Path) -> Path:
+    input_dir = tmp_path / "input"
+    config = METRIC_CONFIG.replace(
+        next(line for line in METRIC_CONFIG.splitlines() if line.startswith("input_dir =")),
+        f'input_dir = "{input_dir.name}"',
+    )
+    create_config(tmp_path, config)
+    create_video_files(input_dir, f"{tmp_path.name}.mkv")
+    return tmp_path
+
+
+def test_hdr_entry_without_metadata_is_skipped_and_reprobed(probe_workspace: Path) -> None:
+    loader = RecordingLoader(hdr=True)
+    cold = _run(probe_workspace, loader).clips[0].probe
+    key = probe_cache.compute_probe_cache_key(cold.fingerprint)
+    cache_path = probe_workspace / "generated" / "clip_probe.toml"
+    payload = tomllib.loads(cache_path.read_text(encoding="utf-8"))
+    del payload[key]["hdr_metadata"]
+    cache_path.write_text(tomli_w.dumps(payload), encoding="utf-8")
+
+    assert probe_cache.load_clip_probe_cache(cache_path) == {}
+    reprobed = _run(probe_workspace, loader).clips[0].probe
+
+    assert loader.calls == 2
+    assert reprobed == cold
+    assert probe_cache.load_clip_probe_cache(cache_path) == {key: cold}
+
+
+@pytest.fixture
+def preview_decimal_conversion_limit() -> Iterator[None]:
+    original = sys.get_int_max_str_digits()
+    sys.set_int_max_str_digits(sys.int_info.str_digits_check_threshold)
+    try:
+        yield
+    finally:
+        sys.set_int_max_str_digits(original)
+
+
+@pytest.mark.usefixtures("preview_decimal_conversion_limit")
+@pytest.mark.parametrize(
+    ("table", "field", "invalid_value", "mastering_display"),
+    [
+        pytest.param("preserved_frame_props", "_ColorRange", True, None, id="bool-prop"),
+        pytest.param("preserved_frame_props", "_ColorRange", -(2**63) - 1, None, id="prop-int64"),
+        pytest.param("hdr_metadata", "transfer", 2**63, None, id="hdr-int64"),
+        pytest.param(
+            "preserved_frame_props",
+            "Transfer",
+            "0" * (sys.int_info.str_digits_check_threshold + 1),
+            None,
+            id="preview-decimal-conversion",
+        ),
+        pytest.param(
+            "hdr_metadata",
+            "mastering_display",
+            f"L({'9' * 320},50)",
+            "L(10000000,50)",
+            id="scaled-luminance-overflow",
+        ),
+        pytest.param(
+            "hdr_metadata",
+            "mastering_display",
+            f"L({'9' * 320}.0,0.005)",
+            "L(1000.0,0.005)",
+            id="decimal-luminance-nonfinite",
+        ),
+    ],
+)
+def test_corrupt_probe_entry_is_reprobed_with_identical_facts(
+    probe_workspace: Path,
+    table: str,
+    field: str,
+    invalid_value: str | int | bool,
+    mastering_display: str | None,
+) -> None:
+    class SignalLoader(FakeHDRVSLoader):
+        def load(self, path: Path) -> SourceInfo:
+            source = super().load(path)
+            frame_props: dict[str, object] = {
+                "_ColorRange": 1,
+                "Transfer": " 016 ",
+                "DolbyVisionRPU": b"rpu",
+            }
+            hdr = source.hdr_metadata
+            assert hdr is not None
+            if mastering_display is None:
+                frame_props.update(
+                    MasteringDisplayMinLuminance=0.005, MasteringDisplayMaxLuminance=1000.0
+                )
+            else:
+                hdr = replace(hdr, mastering_display=mastering_display)
+            return replace(source, frame_props=frame_props, hdr_metadata=hdr)
+
+    loader = SignalLoader()
+    cache_path = probe_workspace / "generated" / "clip_probe.toml"
+    with patch.object(loader, "load", wraps=loader.load) as load:
+        cold = _run(probe_workspace, loader).clips[0].probe
+        key = probe_cache.compute_probe_cache_key(cold.fingerprint)
+        payload = tomllib.loads(cache_path.read_text(encoding="utf-8"))
+        payload[key][table][field] = invalid_value
+        cache_path.write_text(tomli_w.dumps(payload), encoding="utf-8")
+
+        reprobed = _run(probe_workspace, loader).clips[0].probe
+        warm = _run(probe_workspace, loader).clips[0].probe
+
+    assert load.call_count == 2
+    cold_facts = _source_signal_facts(cold)
+    assert cold_facts == SourceSignalFacts(
+        is_hdr=True,
+        primaries=9,
+        transfer=16,
+        matrix=9,
+        color_range="limited",
+        dolby_vision_rpu=True,
+        hdr_static=HDRStaticFacts(
+            mastering_min_nits=0.005,
+            mastering_max_nits=1000.0,
+            max_cll=1000,
+            max_fall=400,
+        ),
+    )
+    assert _source_signal_facts(reprobed) == _source_signal_facts(warm) == cold_facts
+    assert warm.preserved_frame_props == cold.preserved_frame_props
+    assert warm.hdr_metadata is not None
+    assert cold.hdr_metadata is not None
+    assert warm.hdr_metadata.mastering_display == cold.hdr_metadata.mastering_display
+    assert type(warm.hdr_metadata.max_cll) is int
+    assert type(warm.hdr_metadata.max_fall) is int

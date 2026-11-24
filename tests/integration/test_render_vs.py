@@ -32,7 +32,7 @@ def test_vs_render_creates_valid_png(tmp_path: Path):
         encoder_settings=EncoderSettings(),
     )
 
-    result = render_frame_detailed(request, renderer="vapoursynth").path
+    result = render_frame_detailed(request).path
 
     assert result == output_path
     assert output_path.exists()
@@ -65,7 +65,7 @@ def test_vs_render_converts_rgbs_to_png(tmp_path: Path):
         encoder_settings=EncoderSettings(),
     )
 
-    result = render_frame_detailed(request, renderer="vapoursynth").path
+    result = render_frame_detailed(request).path
 
     assert result == output_path
     assert output_path.exists()

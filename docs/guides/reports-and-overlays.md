@@ -52,27 +52,31 @@ embed_images = true
 
 Move between frames with the frame selector, the arrow buttons, or the filmstrip, which
 filters by category and has **Compact**, **Normal**, and **Large** sizes. Choose the
-pair
-with the two source selectors and swap them with the button between them.
+pair with the two source selectors and swap them with the button between them.
+Each selector starts with the short source name. Hover over the closed selector
+to see the full name.
 
-The floating palette over the image holds zoom, fit, viewport reset, fullscreen,
-**Source labels**, and **Lens**. `report.include_filmstrip = false` hides the filmstrip.
-`Offset: none` in the toolbar refers to a spatial image offset; it does not change
-timing
-alignment.
+The viewport palette holds zoom, fit, viewport reset, fullscreen, **Source labels**,
+and **Lens**. In Grid, the palette sits below or beside the cells, keeping footer
+labels clear. The frame selector shows the current frame in the toolbar. In
+fullscreen Grid, the frame chip shows it below the cells. In the other modes the
+palette floats over the image. `report.include_filmstrip = false` hides the filmstrip.
+The toolbar shows **Offset** when the displayed pair has a spatial adjustment.
+Image offset moves the picture while leaving timing alignment as it was.
 
-Selectors identify the source at the point of selection. Source labels stay
-anchored to the viewport while zooming and panning, and are useful when baked text is
-outside the visible area. Baked text stays with screenshots uploaded to slow.pics and is
-unaffected by the source-labels toggle.
+Selectors identify the source at the point of selection. In Slider, Single, Diff,
+and Blink, source labels stay near the bottom while you zoom and pan. They sit
+above the frame chip and above a horizontal palette or beside a vertical one.
+Baked text stays with screenshots uploaded to slow.pics and is unaffected by the
+source-labels toggle.
 
 When baked text already provides enough context, hide source labels to reduce
 overlapping
 text.
 
 Source labels show each source's complete file size. Use file size as context; it does
-not measure bitrate or quality. The header shows when the report was generated in your
-browser's locale; hover it for the exact timestamp.
+not measure bitrate or quality. Open **Report Information** to see when the report was generated in your browser's
+locale. Hover over **Generated** for the exact timestamp.
 
 ### Inspector
 
@@ -102,12 +106,21 @@ sources. Drag the lens window's grip to move it.
 
 ### Report information
 
-The **Report information** button in the header opens the **Report Information** dialog.
-It lists the title, report ID, generated time, content, the **Opens in** view, the
-default
-pair, the slow.pics link when uploaded, and every source. Its **Rendering** section
+The toolbar names the comparison. The title uses the title from
+TMDB when available, the shared title from the filenames, or the short source labels.
+Open the Clips inspector or Report Information to see the original filenames.
+
+The **Report information** button in the toolbar opens the **Report Information** dialog,
+including in an empty report. This is the single place for Generated and Content.
+It lists the title, report ID, generated time, frame and source counts, the **Opens in** view,
+the default pair, the slow.pics link when uploaded, and every source. Its **Rendering** section
 states
-whether Frame Compare applied tonemapping and which settings it used.
+whether tonemapping ran and the shared applied transform and controls, or that the
+transform varies by source. The Clips inspector shows each source's actual transform,
+resolved source peak and origin, and any fallback cause. Requested settings remain
+separate in the report payload. New reports use payload 1.4 and new report identities;
+existing saved reports stay viewable, and review imports require an exact report ID
+and payload version.
 
 <figure class="fc-figure fc-figure--narrow">
   <img src="../images/report-information.webp" alt="Report Information dialog listing the title, report ID, generated time, content, the Opens in view, the default pair, and the sources." loading="lazy">
@@ -136,30 +149,27 @@ whether Frame Compare applied tonemapping and which settings it used.
 
 ## Review notes
 
-Viewer state such as the current frame, mode, selected sources, reveal position,
-viewport,
-and review notes can persist in the browser for that report. It does not rewrite the
-report or run folder. Clearing browser storage or opening the report under a different
-URL can remove that local state.
+Review notes stay in this browser for this report. The **Review** tab lets you
+bookmark a frame, choose a tag or preferred clip, and write a note of up to
+1000 Unicode scalars.
 
-Exported review JSON applies only to the report it came from.
+Use **Export review JSON** to keep a copy and **Import review JSON** to load it.
+Import checks that the file matches this report and asks before replacing saved
+notes.
 
-The **Review** tab holds the bookmark, tag, note, and **Preferred clip** fields
-alongside
-**Export review JSON** and **Import review JSON**. Those controls are the only ways to
-keep
-or transfer notes outside the browser that made them.
+If two tabs edit the same report, the last save wins. If browser storage is
+unavailable or fails, changes last for the current session. Export the notes
+before closing the report to keep a copy.
 
-A persistent line states how many review records are saved in this browser, and a fixed
-note beside it reminds you that notes are not stored in the report file. When browser
-storage is unavailable or a save fails, the viewer says changes are kept only for that
-session. Export review JSON while that message is showing to keep the notes.
-
-Import previews additions, changes, and removals before you apply a merge or
-replacement.
-An import that fails validation or a browser-storage write leaves existing records
-unchanged. If browser storage is unavailable, a validated import applies only to the
-current session.
+For each report, this browser also remembers the current frame, view mode, left,
+right, and active sources, reveal position, viewport fit, zoom, and pan
+(including Grid pan), overlay visibility, filmstrip size and collapsed state,
+Inspector open state and selected tab, Blink speed, palette orientation, and
+pair alignments. The viewer keeps this state and review notes in browser storage
+outside the report and run folder. Clearing browser storage removes both, and
+opening the report from a different URL can make them unavailable. Each generated
+report embeds its viewer, so updating Frame Compare leaves existing report files
+as they are.
 
 ## Screenshot overlays
 
@@ -171,7 +181,7 @@ Choose a baked screenshot overlay with the `--overlay` run option or
 | `none` | No baked text; exact-frame facts remain available to the report |
 | `minimal` | Source identity, then available comparison frame, picture type, and file size |
 | `standard` | Minimal provenance plus one selection line, source resolution/size, and transformed output size when relevant |
-| `diagnostic` | Standard context plus only observed signal, applied tonemap, HDR static, exceptional geometry, and proven exact-frame DV facts |
+| `diagnostic` | Standard context plus only observed signal, applied tonemap, HDR static, exceptional geometry, and labeled Dolby Vision RPU presence |
 
 Bake the extra evidence into every screenshot:
 
@@ -185,7 +195,9 @@ overlay_mode = "diagnostic"
 Frame numbering distinguishes the comparison frame from each mapped source frame when
 they differ. The denominator, when shown, is the untrimmed source total. Picture type is
 read from the exact selected original source frame; unknown values are omitted,
-and screenshot generation still succeeds.
+and screenshot generation still succeeds. The diagnostic **Signal** line labels
+source-level Dolby Vision RPU presence as `DV RPU (clip)`. It adds
+`DV RPU (frame)` only when the selected original frame supplies RPU evidence.
 
 File size is the complete container storage cost, formatted with binary MiB/GiB/TiB
 units. It does not rank quality, bitrate efficiency, or a comparison winner. Tonemap

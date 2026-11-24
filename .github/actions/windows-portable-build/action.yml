@@ -1,0 +1,256 @@
+name: Build and exercise Windows portable artifacts
+description: Shared dependency, runtime, and packaging steps for Windows release and PR jobs.
+inputs:
+  expected_sha:
+    description: Exact commit checked out by the calling job
+    required: true
+  release_build:
+    description: Require a clean, exact release checkout
+    required: true
+outputs:
+  bundle_id:
+    description: Immutable portable input artifact ID
+    value: ${{ steps.bundle.outputs.artifact-id }}
+  bundle_digest:
+    description: SHA-256 of the raw portable ZIP
+    value: ${{ steps.bundle.outputs.artifact-digest }}
+runs:
+  using: composite
+  steps:
+    - name: Require current portable manifest
+      shell: pwsh
+      env:
+        EXPECTED_SHA: ${{ inputs.expected_sha }}
+      run: |
+        $ErrorActionPreference = "Stop"
+        $PSNativeCommandUseErrorActionPreference = $true
+        $json = (git show "${env:EXPECTED_SHA}:tools/windows_portable/manifest.windows-x64.json") -join "`n"
+        $manifest = $json | ConvertFrom-Json
+        $version = $manifest.manifest_version
+        if (($version -isnot [int] -and $version -isnot [long]) -or $version -ne 3) {
+          throw "Hosted Windows portable builds require manifest version 3."
+        }
+
+    - name: Setup Python 3.13.17
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+      with:
+        python-version: "3.13.17"
+
+    - name: Setup uv
+      uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+      with:
+        version: "0.13.8"
+        enable-cache: false
+
+    - name: Install dev dependencies (frozen)
+      shell: pwsh
+      env:
+        EXPECTED_SHA: ${{ inputs.expected_sha }}
+      run: |
+        $PSNativeCommandUseErrorActionPreference = $true
+        $wheelhouse = Join-Path $env:RUNNER_TEMP "anitopy-wheel"
+        python -B -I -S tools/windows_portable/portable_runtime.py anitopy-wheel `
+          --cache .portable_cache --output $wheelhouse --commit-sha "$env:EXPECTED_SHA"
+        uv sync --all-groups --extra vsview --frozen --no-build --no-install-package anitopy
+        uv --offline --no-config pip install --no-index --no-deps --no-build --no-python-downloads `
+          (Join-Path $wheelhouse "anitopy-2.1.1-py3-none-any.whl")
+
+    - name: Full test suite
+      shell: pwsh
+      run: uv run --no-sync pytest -q --ignore=tests/windows_portable/test_windows_portable_zip_succession.py
+
+    - name: Build portable bundle
+      shell: pwsh
+      env:
+        RELEASE_BUILD: ${{ inputs.release_build }}
+        EXPECTED_SHA: ${{ inputs.expected_sha }}
+      run: |
+        $ErrorActionPreference = "Stop"
+        $PSNativeCommandUseErrorActionPreference = $true
+        $out = "dist/frame-compare-portable-win-x64"
+        $proofLog = "dist/windows-bundle-runtime-proof.log"
+        New-Item -ItemType Directory -Force -Path "dist" | Out-Null
+        $buildArgs = @(
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "tools/windows_portable/build_portable.ps1",
+          "-ExpectedCommitSha",
+          $env:EXPECTED_SHA,
+          "-ManifestPath",
+          "tools/windows_portable/manifest.windows-x64.json",
+          "-OutDir",
+          $out,
+          "-CacheDir",
+          ".portable_cache"
+        )
+        if ($env:RELEASE_BUILD -eq "true") {
+          $buildArgs += "-ReleaseBuild"
+        }
+        pwsh @buildArgs 2>&1 | Tee-Object -FilePath $proofLog
+        if ($LASTEXITCODE -ne 0) {
+          exit $LASTEXITCODE
+        }
+        $proof = Get-Content -LiteralPath $proofLog -Raw
+        foreach ($phase in @(
+          "package_imports",
+          "runtime_contract",
+          "vapoursynth_environment",
+          "lwlibavsource_frame",
+          "vapoursynth_screenshot",
+          "placebo_tonemap_api",
+          "apply_tonemap_frame",
+          "placebo_tonemap_frame",
+          "vsview_runtime"
+        )) {
+          if ($proof -notmatch "WINDOWS_BUNDLE_PROOF phase=$phase ok") {
+            throw "Required portable runtime proof phase missing: $phase"
+          }
+        }
+        if ($proof -notmatch "WINDOWS_BUNDLE_PROOF vsview_runtime=ok") {
+          throw "Required combined VSView runtime proof marker missing."
+        }
+        foreach ($marker in @(
+          "pyside6_event_loop=ok",
+          "vsview_deep_imports=ok",
+          "qt_multimedia_backend=windows audio_device=(?:default|none) audio_outputs=\d+",
+          "qt_webengine_runtime=absent deployment=excluded",
+          "project_entrypoint=ok source=app/src",
+          "alignment_panel=ok state=inactive platform=offscreen",
+          "bestsource_frame=ok",
+          "alignment_metadata=ok outputs=Reference,Comparison_1,Comparison_2 topology=one_reference_ordered_comparisons",
+          "alignment_result_roundtrip=ok",
+          "alignment_result_validation=ok malformed=rejected",
+          "generated_vsview_session=ok",
+          "vsview_gui_launch=ok platform=offscreen timeout=expected cleanup=ok"
+        )) {
+          if ($proof -notmatch "WINDOWS_BUNDLE_PROOF $marker") {
+            throw "Required VSView runtime proof marker missing: $marker"
+          }
+        }
+        $directReceipts = @(
+          $proof -split '\r?\n' | Where-Object { $_ -cmatch '^WINDOWS_BUNDLE_PROOF placebo_direct_frame=' }
+        )
+        if ($directReceipts.Count -ne 2) {
+          throw "Expected exactly two direct placebo frame receipts."
+        }
+        foreach ($context in @("standalone", "post_qt")) {
+          $receipt = @($directReceipts | Where-Object { $_ -cmatch " context=$context$" })
+          if ($receipt.Count -ne 1) {
+            throw "Expected one direct placebo frame receipt for $context."
+          }
+          if ($receipt[0] -cmatch "^WINDOWS_BUNDLE_PROOF placebo_direct_frame=ok format=[A-Za-z0-9_]+ bits=[0-9]+ context=$context$") {
+            Write-Host "Direct placebo frame proof completed ($context)."
+          } elseif ($receipt[0] -ceq "WINDOWS_BUNDLE_PROOF placebo_direct_frame=skipped reason=vulkan_runtime_unavailable context=$context") {
+            Write-Warning "Hosted runner lacks a usable Vulkan runtime ($context); direct placebo frame proof remains required in Phase 2."
+          } else {
+            throw "Direct placebo frame proof did not report a recognized result for $context."
+          }
+        }
+
+    - name: Verify bundle workspace directories
+      shell: pwsh
+      run: |
+        $bundle = (Resolve-Path "dist/frame-compare-portable-win-x64").Path
+        $bundleConfigDir = Join-Path $bundle "config"
+        $bundleInputDir = Join-Path $bundle "comparison_videos"
+        $vsPackagePlugins = Join-Path $bundle "app/site-packages/vapoursynth/plugins"
+        $canonicalLsmasPlugin = Join-Path $vsPackagePlugins "LSMASHSource.dll"
+        $extraPluginRoot = Join-Path $bundle "vs/extra-plugins"
+
+        if (!(Test-Path -LiteralPath $bundleConfigDir -PathType Container)) {
+          throw "Missing default workspace directory in bundle: $bundleConfigDir"
+        }
+        if (!(Test-Path -LiteralPath $bundleInputDir -PathType Container)) {
+          throw "Missing default workspace directory in bundle: $bundleInputDir"
+        }
+        if (!(Test-Path -LiteralPath $vsPackagePlugins -PathType Container)) {
+          throw "Missing R74+ VapourSynth package plugin directory: $vsPackagePlugins"
+        }
+        if (!(Test-Path -LiteralPath $canonicalLsmasPlugin -PathType Leaf)) {
+          throw "Missing canonical L-SMASH plugin: $canonicalLsmasPlugin"
+        }
+        if (Test-Path -LiteralPath $extraPluginRoot) {
+          throw "Unexpected duplicate extra-plugin tree: $extraPluginRoot"
+        }
+
+    - name: "Smoke: absolute candidate launcher"
+      shell: pwsh
+      run: |
+        $bundle = (Resolve-Path "dist/frame-compare-portable-win-x64").Path
+        $launcher = Join-Path $bundle "frame-compare.ps1"
+        Get-Command -CommandType ExternalScript $launcher | Format-List Source,Path
+        & $launcher --help | Out-Host
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        $expectedVersion = python -B -I -S -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        $versionOutput = @(& $launcher version)
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        $versionOutput | Out-Host
+        if ($versionOutput.Count -ne 1 -or $versionOutput[0] -cne "frame-compare $expectedVersion") {
+          throw "Candidate version output must be exactly frame-compare $expectedVersion"
+        }
+        $doctorStdout = Join-Path $env:RUNNER_TEMP "bundle-doctor.json"
+        $doctorStderr = Join-Path $env:RUNNER_TEMP "bundle-doctor.stderr.txt"
+        & $launcher doctor --json 1> $doctorStdout 2> $doctorStderr
+        $exitCode = $LASTEXITCODE
+        $knownNoise = "Core plugin autoloading failed. Installation is broken!"
+        foreach ($line in Get-Content -LiteralPath $doctorStderr) {
+          if ($line -eq $knownNoise) {
+            continue
+          }
+          Write-Warning $line
+        }
+        if ($exitCode -ne 0) {
+          exit $exitCode
+        }
+        $doctorJson = Get-Content -LiteralPath $doctorStdout -Raw
+        try {
+          $doctorPayload = $doctorJson | ConvertFrom-Json -ErrorAction Stop
+        } catch {
+          throw "Candidate doctor stdout is not exactly one valid JSON document: $($_.Exception.Message)"
+        }
+        if ($doctorPayload -isnot [PSCustomObject] -or $doctorPayload.success -ne $true) {
+          throw "Candidate doctor JSON is not a successful object"
+        }
+        $ffmpegChecks = @(
+          $doctorPayload.doctor.checks |
+            Where-Object { $_.id -ceq "ffmpeg" }
+        )
+        if ($ffmpegChecks.Count -ne 1 -or $ffmpegChecks[0].status -cne "pass") {
+          throw "Candidate doctor FFmpeg check did not pass exactly once"
+        }
+        Write-Host $doctorJson
+
+    - name: Package zip
+      shell: pwsh
+      run: |
+        $bundle = "dist/frame-compare-portable-win-x64"
+        $zip = "dist/frame-compare-portable-win-x64.zip"
+        if (Test-Path $zip) { Remove-Item -Force $zip }
+        python -B -I -S tools/windows_portable/portable_bundle.py pack --root $bundle --output $zip
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    - name: Test packed ZIP succession
+      shell: pwsh
+      run: |
+        $env:FRAME_COMPARE_TEST_PORTABLE_ZIP = (Resolve-Path -LiteralPath "dist/frame-compare-portable-win-x64.zip" -ErrorAction Stop).Path
+        $results = Join-Path $env:RUNNER_TEMP "windows-zip-succession.xml"
+        uv run --no-sync pytest -q -rs -s tests/windows_portable/test_windows_portable_zip_succession.py --junitxml $results
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        $report = [xml](Get-Content -LiteralPath $results -Raw)
+        $suite = $report.testsuites.testsuite
+        if ([int]$suite.tests -ne 8 -or [int]$suite.skipped -ne 0) {
+          throw "Packed ZIP succession requires all eight cases with no skips."
+        }
+        Write-Host "Packed ZIP succession: $($suite.tests) passed, $($suite.skipped) skipped."
+
+    - name: Upload raw portable ZIP
+      id: bundle
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: frame-compare-portable-win-x64.zip
+        path: dist/frame-compare-portable-win-x64.zip
+        archive: false
+        if-no-files-found: error

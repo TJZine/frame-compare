@@ -4,7 +4,7 @@ import os
 from fractions import Fraction
 from pathlib import Path
 
-from frame_compare.analysis.cache_io import CACHE_VERSION, metrics_cache_filename
+from frame_compare.analysis.cache_io import metrics_cache_filename
 from frame_compare.analysis.metric_identity import (
     metric_algorithm_id,
     metric_backend,
@@ -30,15 +30,14 @@ def valid_cache_metadata_payload(
     metric_active_rect: dict[str, int] | None = None,
     active_rect_source: ActiveRectSource = "full-frame",
     active_rect_detection_mode: ActiveRectDetectionMode = "aspect_ratio",
-    active_rect_algorithm_id: ActiveRectAlgorithmId = "active_rect_resolution_v2",
+    active_rect_algorithm_id: ActiveRectAlgorithmId = "active_rect_resolution_v3",
 ) -> dict[str, object]:
     return {
         "frame_count": frame_count,
         "source_frame_count": frame_count,
         "metric_source_start": 0,
         "metric_source_end_exclusive": frame_count,
-        "fps": "24/1",
-        "config_fingerprint": "fp",
+        "fps": "24",
         "analysis_source_path": "",
         "clips": [],
         "performance_mode": config.performance_mode.value,
@@ -49,7 +48,6 @@ def valid_cache_metadata_payload(
         "active_rect_source": active_rect_source,
         "active_rect_detection_mode": active_rect_detection_mode,
         "active_rect_algorithm_id": active_rect_algorithm_id,
-        "version": CACHE_VERSION,
     }
 
 
@@ -76,7 +74,7 @@ def metrics_metadata(
     metric_active_rect: MetricActiveRect | None = None,
     active_rect_source: ActiveRectSource = "full-frame",
     active_rect_detection_mode: ActiveRectDetectionMode = "aspect_ratio",
-    active_rect_algorithm_id: ActiveRectAlgorithmId = "active_rect_resolution_v2",
+    active_rect_algorithm_id: ActiveRectAlgorithmId = "active_rect_resolution_v3",
 ) -> MetricsMetadata:
     return MetricsMetadata(
         frame_count=frame_count,
@@ -95,5 +93,4 @@ def metrics_metadata(
         active_rect_source=active_rect_source,
         active_rect_detection_mode=active_rect_detection_mode,
         active_rect_algorithm_id=active_rect_algorithm_id,
-        version=CACHE_VERSION,
     )

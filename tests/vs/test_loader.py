@@ -3,12 +3,15 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.vs.loader import DefaultVSLoader
+from frame_compare.vs.source_index_cache import ManagedSourceIndexCache
 
 
 def test_default_vs_loader_load_calls_load_source(tmp_path: Path) -> None:
     """Verify DefaultVSLoader.load delegates to load_source."""
-    loader = DefaultVSLoader()
+    cache = ManagedSourceIndexCache(tmp_path.resolve())
+    loader = DefaultVSLoader(index_cache=cache, scan_frame_geometry=True)
     path = tmp_path / "video.mkv"
 
     with (
@@ -20,7 +23,13 @@ def test_default_vs_loader_load_calls_load_source(tmp_path: Path) -> None:
 
         loader.load(path)
 
-        mock_load.assert_called_once_with(path, mock_core)
+        mock_load.assert_called_once_with(
+            path,
+            mock_core,
+            index_cache=cache,
+            scan_frame_geometry=True,
+            abort_check=raise_if_cancelling,
+        )
 
 
 def test_default_vs_loader_ensure_core_caches_per_instance() -> None:

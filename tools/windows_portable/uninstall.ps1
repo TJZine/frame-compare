@@ -1,58 +1,36 @@
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-function ConvertTo-NormalizedPathEntry([string]$PathEntry) {
-  if ([string]::IsNullOrWhiteSpace($PathEntry)) {
-    return ""
-  }
-  return $PathEntry.Trim().Trim('"').TrimEnd('\').ToLowerInvariant()
-}
+. (Join-Path $PSScriptRoot "portable_activation.ps1")
 
-function Remove-DirectoryIfEmpty([string]$Path) {
-  if (
-    (Test-Path -LiteralPath $Path -PathType Container) -and
-    @(Get-ChildItem -LiteralPath $Path -Force).Count -eq 0
-  ) {
-    Remove-Item -LiteralPath $Path -Force
-  }
-}
-
-$installRoot = Join-Path (Join-Path $env:LOCALAPPDATA "Programs") "FrameCompare"
+$stateDir = Get-PortableStateDirectory
+$installRoot = Split-Path -Parent $stateDir
 $binDir = Join-Path $installRoot "bin"
-$stateDir = Join-Path $installRoot "state"
 
-$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-$entries = @()
-if (-not [string]::IsNullOrWhiteSpace($userPath)) {
-  $entries = @($userPath -split ";" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-}
-
-$normalizedBinDir = ConvertTo-NormalizedPathEntry -PathEntry $binDir
-$filtered = @()
-foreach ($entry in $entries) {
-  if ((ConvertTo-NormalizedPathEntry -PathEntry $entry) -ne $normalizedBinDir) {
-    $filtered += $entry
+$activationLock = Open-PortableActivationLock $stateDir
+try {
+  Assert-NoPendingPortableMigration $stateDir
+  Assert-NoReparsePointAncestor -Path $binDir -Label "Installed shims"
+  $shimPaths = @(Get-PortableShimNames | ForEach-Object { Join-Path $binDir $_ })
+  $pointerPaths = @("config.json", "config.json.tmp" | ForEach-Object { Join-Path $stateDir $_ })
+  $installedFiles = $shimPaths + $pointerPaths
+  foreach ($path in $installedFiles) {
+    $null = Get-OptionalPortableRegularFile $path
   }
-}
-[Environment]::SetEnvironmentVariable("Path", ($filtered -join ";"), "User")
 
-foreach ($file in @("frame-compare.ps1", "frame-compare.cmd", "frame-compare-update.ps1", "frame-compare-update.cmd", "update_public_key.xml")) {
-  $path = Join-Path $binDir $file
-  if (Test-Path -LiteralPath $path) {
-    Remove-Item -LiteralPath $path -Force
+  Update-PortableUserPath -BinDir $binDir -Remove
+
+  foreach ($path in $installedFiles) {
+    Remove-OptionalPortableRegularFile $path
   }
-}
 
-foreach ($file in @("config.json", "config.json.tmp")) {
-  $path = Join-Path $stateDir $file
-  if (Test-Path -LiteralPath $path) {
-    Remove-Item -LiteralPath $path -Force
+  if ([IO.Directory]::Exists($binDir) -and
+      @(Get-ChildItem -LiteralPath $binDir -Force).Count -eq 0) {
+    [IO.Directory]::Delete($binDir)
   }
+} finally {
+  $activationLock.Dispose()
 }
-
-Remove-DirectoryIfEmpty -Path $binDir
-Remove-DirectoryIfEmpty -Path $stateDir
-Remove-DirectoryIfEmpty -Path $installRoot
 
 Write-Host "Uninstalled Frame Compare shim."
 Write-Host "Open a new terminal to observe PATH changes."

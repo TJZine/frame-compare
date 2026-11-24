@@ -1,5 +1,3 @@
-"""Tests for config utilities."""
-
 from __future__ import annotations
 
 from frame_compare.config.utils import deep_merge
@@ -56,10 +54,8 @@ def test_deep_merge_does_not_mutate_input_mappings() -> None:
         "b": 2,
     }
 
-    # Run deep_merge
     result = deep_merge(base, updates)
 
-    # Assert result is correct
     assert result == {
         "section1": {
             "key1": "value1-updated",
@@ -68,7 +64,6 @@ def test_deep_merge_does_not_mutate_input_mappings() -> None:
         "b": 2,
     }
 
-    # Verify inputs were not mutated
     assert base == {
         "section1": {
             "key1": "value1",

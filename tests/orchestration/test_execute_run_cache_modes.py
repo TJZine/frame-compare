@@ -6,32 +6,50 @@ import asyncio
 import json
 from fractions import Fraction
 from pathlib import Path
-from typing import cast
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
 import frame_compare.analysis.cache_io as cache_io
+import frame_compare.analysis.metrics as metrics_owner
 import frame_compare.services.alignment_reuse_cache as alignment_reuse_cache
 from frame_compare.analysis.errors import MetricsCalculationError
+from frame_compare.analysis.metric_identity import (
+    metric_algorithm_id,
+    metric_backend,
+    stable_metric_algorithm_identity_json,
+)
+from frame_compare.analysis.metric_strategies import MetricComputationResult
+from frame_compare.analysis.sampling import plan_performance_bursts
 from frame_compare.analysis.types import (
     CacheLoadResult,
     ClipIdentity,
     MetricCacheRequest,
+    MetricFrameRange,
     MetricsAcquisition,
 )
 from frame_compare.config.loader import load_config
 from frame_compare.config.overrides import CLIConfigOverrides
+from frame_compare.config.schema import AnalysisConfig
 from frame_compare.config.schema_enums import AnalysisPerformanceMode
 from frame_compare.orchestration import phase_selection
-from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
+from frame_compare.orchestration.coordinator import RunDependencies, execute_run
 from frame_compare.orchestration.execution_types import PublishPhaseOutput
-from frame_compare.utils.cache_errors import CacheCorruptionError, CacheVersionMismatchError
+from frame_compare.orchestration.types import (
+    FullWindowRetryConfirmationDecision,
+    FullWindowRetryConfirmationRequest,
+)
+from frame_compare.utils.cache_errors import CacheCorruptionError
+from tests.e2e.harness import read_report_data
+from tests.run_request_support import make_run_request
 
 from .execute_run_helpers import (
-    FakeFFmpegRunner,
     FakeVSLoader,
+    FakeVSNode,
     analysis_selection_domain_for_cache_inputs,
     create_video_files,
+    install_fake_frame_render,
     metric_cache_fingerprint,
     write_metrics_cache,
     write_probe_cache_for_inputs,
@@ -66,12 +84,13 @@ def test_execute_run_no_cache_deletes_only_current_scoped_metrics_cache(
     monkeypatch: pytest.MonkeyPatch,
     performance: bool,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(
         tmp_path,
         content=_cache_config(
             analysis="random_frame_count = 0\ndark_frame_count = 1",
             audio_alignment="enable = false",
-            screenshots='use_ffmpeg = true\nactive_rect_detection = "aspect_ratio"',
+            screenshots='active_rect_detection = "aspect_ratio"',
             report="enable = false",
         ),
     )
@@ -126,15 +145,17 @@ def test_execute_run_no_cache_deletes_only_current_scoped_metrics_cache(
         encoding="utf-8",
     )
 
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         no_cache=True,
         skip_analysis=False,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
 
-    def _fake_calculate_metrics(**_kwargs: object) -> MetricsAcquisition:
+    def _fake_calculate_metrics(
+        request: MetricCacheRequest, **_kwargs: object
+    ) -> MetricsAcquisition:
         return MetricsAcquisition(
             metrics=_frame_metrics(
                 luminance=[0.1] * 100,
@@ -147,7 +168,6 @@ def test_execute_run_no_cache_deletes_only_current_scoped_metrics_cache(
                         path=str(source_path),
                         size=source_path.stat().st_size,
                         mtime=source_path.stat().st_mtime,
-                        sha1=None,
                     )
                 ],
             ),
@@ -155,7 +175,7 @@ def test_execute_run_no_cache_deletes_only_current_scoped_metrics_cache(
         )
 
     monkeypatch.setattr(phase_selection, "calculate_metrics", _fake_calculate_metrics)
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    deps = RunDependencies(vs_loader=FakeVSLoader())
 
     asyncio.run(execute_run(request, deps=deps))
 
@@ -172,19 +192,19 @@ def test_execute_run_from_cache_only_fails_when_probe_cache_missing(
         content=_cache_config(
             analysis="random_frame_count = 0\ndark_frame_count = 1",
             audio_alignment="enable = false",
-            screenshots='use_ffmpeg = true\nactive_rect_detection = "aspect_ratio"',
+            screenshots='active_rect_detection = "aspect_ratio"',
             report="enable = false",
         ),
     )
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
 
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=FakeVSLoader())
 
@@ -192,7 +212,7 @@ def test_execute_run_from_cache_only_fails_when_probe_cache_missing(
         asyncio.run(execute_run(request, deps=deps))
 
 
-@pytest.mark.parametrize("second_read", ["valid", "missing", "corrupted", "version_mismatch"])
+@pytest.mark.parametrize("second_read", ["valid", "missing", "corrupted"])
 def test_execute_run_cache_only_requires_valid_metrics_after_prevalidation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -203,7 +223,7 @@ def test_execute_run_cache_only_requires_valid_metrics_after_prevalidation(
         content=_cache_config(
             analysis="random_frame_count = 1\nrandom_seed = 42\ndark_frame_count = 1",
             audio_alignment="enable = false",
-            screenshots='use_ffmpeg = true\nactive_rect_detection = "aspect_ratio"',
+            screenshots='active_rect_detection = "aspect_ratio"',
             report="enable = false",
         )
         + "\n[slowpics]\nauto_upload = true\n",
@@ -234,10 +254,6 @@ def test_execute_run_cache_only_requires_valid_metrics_after_prevalidation(
                 cache_path.unlink()
             elif second_read == "corrupted":
                 cache_path.write_text("invalid JSON", encoding="utf-8")
-            elif second_read == "version_mismatch":
-                payload = json.loads(cache_path.read_text(encoding="utf-8"))
-                payload["version"] = cache_io.CACHE_VERSION + 1
-                cache_path.write_text(json.dumps(payload), encoding="utf-8")
         return result
 
     compute_calls: list[str] = []
@@ -255,26 +271,25 @@ def test_execute_run_cache_only_requires_valid_metrics_after_prevalidation(
     monkeypatch.setattr(cache_io, "load_cached_metrics_for_request", _load_then_invalidate)
     monkeypatch.setattr(phase_selection, "calculate_metrics", _unexpected_compute)
     monkeypatch.setattr("frame_compare.orchestration.execution.run_publish_phase", _publish)
-    runner = FakeFFmpegRunner()
-    request = RunRequest(root=tmp_path, from_cache_only=True, skip_metadata=True)
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=runner)
+    recorded = install_fake_frame_render(monkeypatch)
+    request = make_run_request(root=tmp_path, from_cache_only=True, skip_metadata=True)
+    deps = RunDependencies(vs_loader=FakeVSLoader())
 
     if second_read == "valid":
         result = asyncio.run(execute_run(request, deps=deps))
         assert result.success is True
         assert result.cache_hit is True
         assert result.frame_count == 2
-        assert len(runner.calls) == 4
+        assert len(recorded) == 4
         assert publish_calls == ["publish"]
     else:
         expected_error = {
             "missing": MetricsCalculationError,
             "corrupted": CacheCorruptionError,
-            "version_mismatch": CacheVersionMismatchError,
         }[second_read]
         with pytest.raises(expected_error):
             asyncio.run(execute_run(request, deps=deps))
-        assert runner.calls == []
+        assert recorded == []
         assert publish_calls == []
 
     assert len(reads) == 2
@@ -289,48 +304,245 @@ def test_execute_run_optional_analysis_failure_retains_initial_frame_plan(
     create_config(
         tmp_path,
         content=_cache_config(
-            analysis="random_frame_count = 1\ndark_frame_count = 1",
+            analysis="user_frames = [9]\nrandom_frame_count = 1\nrandom_seed = 7\ndark_frame_count = 1",
             audio_alignment="enable = false",
-            screenshots='use_ffmpeg = true\nactive_rect_detection = "aspect_ratio"',
-            report="enable = false",
+            screenshots='active_rect_detection = "aspect_ratio"',
+            report="enable = true\nauto_open = false",
         ),
     )
     create_video_files(tmp_path / "comparison_videos", "a_source.mkv", "b_comp.mkv")
 
-    def _fail_metrics(**_kwargs: object) -> MetricsAcquisition:
+    def _fail_metrics(_request: MetricCacheRequest, **_kwargs: object) -> MetricsAcquisition:
         raise MetricsCalculationError("analysis unavailable")
 
     monkeypatch.setattr(phase_selection, "calculate_metrics", _fail_metrics)
-    runner = FakeFFmpegRunner()
+    recorded = install_fake_frame_render(monkeypatch)
     result = asyncio.run(
         execute_run(
-            RunRequest(
+            make_run_request(
                 root=tmp_path,
                 skip_metadata=True,
-                config_overrides=CLIConfigOverrides(no_upload=True),
+                overrides=CLIConfigOverrides(no_upload=True),
             ),
-            deps=RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=runner),
+            deps=RunDependencies(vs_loader=FakeVSLoader()),
         )
     )
 
     assert result.success is True
-    assert result.frame_count == 1
-    assert len(runner.calls) == 2
+    assert result.frame_count == 2
+    assert result.report_path is not None
+    frames = read_report_data(result.report_path)["frames"]
+    assert [(frame["number"], frame["category"]) for frame in frames] == [
+        (9, "user"),
+        (53, "random"),
+    ]
+    assert sorted(
+        (cast(FakeVSNode, cast(Any, r.clip)).source_path.name, r.frame_number) for r in recorded
+    ) == [
+        ("a_source.mkv", 9),
+        ("a_source.mkv", 53),
+        ("b_comp.mkv", 9),
+        ("b_comp.mkv", 53),
+    ]
     assert any(
         warning.source == "analysis" and "analysis unavailable" in warning.text
         for warning in result.warnings
     )
 
 
+def test_execute_run_analysis_failure_without_initial_frames_is_fatal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    create_config(
+        tmp_path,
+        content=_cache_config(
+            analysis="random_frame_count = 0\ndark_frame_count = 1",
+            audio_alignment="enable = false",
+            screenshots='active_rect_detection = "aspect_ratio"',
+            report="enable = false",
+        ),
+    )
+    create_video_files(tmp_path / "comparison_videos", "a_source.mkv", "b_comp.mkv")
+    error = MetricsCalculationError("analysis unavailable")
+
+    def _fail_metrics(_request: MetricCacheRequest, **_kwargs: object) -> MetricsAcquisition:
+        raise error
+
+    monkeypatch.setattr(phase_selection, "calculate_metrics", _fail_metrics)
+    recorded = install_fake_frame_render(monkeypatch)
+    with pytest.raises(MetricsCalculationError) as caught:
+        asyncio.run(
+            execute_run(
+                make_run_request(
+                    root=tmp_path,
+                    skip_metadata=True,
+                    overrides=CLIConfigOverrides(no_upload=True),
+                ),
+                deps=RunDependencies(vs_loader=FakeVSLoader()),
+            )
+        )
+    assert caught.value is error
+    assert recorded == []
+
+
+def test_execute_run_metric_selection_survives_dropped_user_frame(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    create_config(
+        tmp_path,
+        content=_cache_config(
+            analysis="user_frames = [120]\nrandom_frame_count = 0\ndark_frame_count = 1",
+            audio_alignment="enable = false",
+            screenshots='active_rect_detection = "aspect_ratio"',
+            report="enable = true\nauto_open = false",
+        ),
+    )
+    input_dir = tmp_path / "comparison_videos"
+    create_video_files(input_dir, "a_source.mkv", "b_comp.mkv")
+    config = load_config(tmp_path / "config" / "config.toml")
+    write_metrics_cache(
+        tmp_path / "generated" / "cache" / "analysis",
+        source_path=input_dir / "a_source.mkv",
+        video_paths=[input_dir / "a_source.mkv", input_dir / "b_comp.mkv"],
+        config=config,
+    )
+    recorded = install_fake_frame_render(monkeypatch)
+    result = asyncio.run(
+        execute_run(
+            make_run_request(
+                root=tmp_path,
+                skip_metadata=True,
+                overrides=CLIConfigOverrides(no_upload=True),
+            ),
+            deps=RunDependencies(vs_loader=FakeVSLoader()),
+        )
+    )
+
+    assert result.success is True
+    assert result.frame_count == 1
+    assert result.report_path is not None
+    frames = read_report_data(result.report_path)["frames"]
+    assert [(frame["number"], frame["category"]) for frame in frames] == [(0, "quantile_dark")]
+    assert sorted(
+        (cast(FakeVSNode, cast(Any, r.clip)).source_path.name, r.frame_number) for r in recorded
+    ) == [
+        ("a_source.mkv", 0),
+        ("b_comp.mkv", 0),
+    ]
+    warning = "1 requested frame falls outside the shared range and was skipped: 120"
+    assert [item.text for item in result.warnings].count(warning) == 1
+    assert capsys.readouterr().err.count(f"! {warning}") == 1
+
+
+def test_execute_run_no_cache_recomputes_warm_full_window_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    create_config(
+        tmp_path,
+        content=_cache_config(
+            analysis=(
+                'random_frame_count = 0\ndark_frame_count = 14\nperformance_mode = "performance"\n'
+                "ignore_lead_seconds = 1.0\nignore_trail_seconds = 1.0\nmin_window_seconds = 0"
+            ),
+            audio_alignment="enable = false",
+            screenshots='active_rect_detection = "aspect_ratio"',
+            report="enable = false",
+        ),
+    )
+    input_dir = tmp_path / "comparison_videos"
+    create_video_files(input_dir, "source.mkv")
+    config = load_config(tmp_path / "config" / "config.toml")
+    full_config = config.model_copy(
+        update={
+            "analysis": config.analysis.model_copy(
+                update={"ignore_lead_seconds": 0.0, "ignore_trail_seconds": 0.0}
+            )
+        }
+    )
+    source = input_dir / "source.mkv"
+    cache_dir = tmp_path / "generated" / "cache" / "analysis"
+    write_metrics_cache(cache_dir, source_path=source, config=full_config)
+
+    computed_ranges: list[tuple[int, int]] = []
+    requests: list[FullWindowRetryConfirmationRequest] = []
+
+    def confirm(request: FullWindowRetryConfirmationRequest) -> FullWindowRetryConfirmationDecision:
+        requests.append(request)
+        return "confirmed"
+
+    def compute_strategy(
+        _source: object,
+        analysis: AnalysisConfig,
+        *_args: object,
+        metric_frame_range: MetricFrameRange,
+        **_kwargs: object,
+    ) -> MetricComputationResult:
+        start, end = metric_frame_range.start, metric_frame_range.end_exclusive
+        computed_ranges.append((start, end))
+        frames = tuple(
+            frame
+            for burst in plan_performance_bursts(window_start=start, window_end_exclusive=end)
+            for frame in range(burst.start, burst.end_exclusive)
+        )
+        return MetricComputationResult(
+            luminance=[0.1] * len(frames),
+            motion=[0.0] * len(frames),
+            performance_mode=analysis.performance_mode.value,
+            algorithm_id=metric_algorithm_id(analysis),
+            metric_backend=metric_backend(analysis),
+            algorithm_identity_json=stable_metric_algorithm_identity_json(analysis),
+            sampled_source_frames=frames,
+        )
+
+    # Keep actual metric cache admission, selection and writes. Supply the native
+    # frame facts at the decoder/strategy boundary in the macOS component test.
+    monkeypatch.setattr(
+        metrics_owner,
+        "_load_analysis_source",
+        lambda *_: SimpleNamespace(
+            clip=SimpleNamespace(num_frames=100),
+            fps=Fraction(24),
+        ),
+    )
+    monkeypatch.setattr(metrics_owner, "calculate_metric_strategy", compute_strategy)
+    install_fake_frame_render(monkeypatch)
+    result = asyncio.run(
+        execute_run(
+            make_run_request(
+                root=tmp_path,
+                no_cache=True,
+                skip_metadata=True,
+                overrides=CLIConfigOverrides(no_upload=True),
+            ),
+            deps=RunDependencies(
+                vs_loader=FakeVSLoader(),
+                confirm_full_window_retry=confirm,
+            ),
+        )
+    )
+
+    assert result.success is True
+    assert result.frame_count == 14
+    assert result.cache_hit is False
+    assert computed_ranges == [(24, 76), (0, 100)]
+    assert len(requests) == 1
+
+
 def test_execute_run_from_cache_only_rejects_cache_for_other_performance_mode(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(
         tmp_path,
         content=_cache_config(
             analysis='random_frame_count = 0\ndark_frame_count = 1\nperformance_mode = "performance"',
             audio_alignment="enable = false",
-            screenshots='use_ffmpeg = true\nactive_rect_detection = "aspect_ratio"',
+            screenshots='active_rect_detection = "aspect_ratio"',
             report="enable = false",
         ),
     )
@@ -351,16 +563,16 @@ def test_execute_run_from_cache_only_rejects_cache_for_other_performance_mode(
         config=quality_config,
     )
 
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    deps = RunDependencies(vs_loader=FakeVSLoader())
 
-    with pytest.raises(MetricsCalculationError, match="Cached metrics missing or mismatched"):
+    with pytest.raises(MetricsCalculationError, match="No cached analysis for this selection"):
         asyncio.run(execute_run(request, deps=deps))
 
 
@@ -394,11 +606,12 @@ def test_execute_run_from_cache_only_uses_scoped_cache(
     filenames: tuple[str, ...],
     analysis_filename: str,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     config_content = (
         _cache_config(
             analysis="random_frame_count = 0\ndark_frame_count = 1",
             audio_alignment="enable = false",
-            screenshots='use_ffmpeg = true\nactive_rect_detection = "aspect_ratio"',
+            screenshots='active_rect_detection = "aspect_ratio"',
             report="enable = false",
         )
         + source_config
@@ -415,12 +628,12 @@ def test_execute_run_from_cache_only_uses_scoped_cache(
         video_paths=paths,
         analysis_source_path=input_dir / analysis_filename,
     )
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
     diagnostics_by_stage: dict[str, list[str]] = {}
 
@@ -435,10 +648,7 @@ def test_execute_run_from_cache_only_uses_scoped_cache(
     result = asyncio.run(
         execute_run(
             request,
-            deps=RunDependencies(
-                vs_loader=FakeVSLoader(),
-                ffmpeg_runner=FakeFFmpegRunner(),
-            ),
+            deps=RunDependencies(vs_loader=FakeVSLoader()),
         )
     )
 
@@ -471,7 +681,6 @@ dark_frame_count = 1
 enable = false
 
 [screenshots]
-use_ffmpeg = true
 active_rect_detection = "aspect_ratio"
 
 [report]
@@ -497,16 +706,16 @@ enable = false
     )
     full_frame_cache_path.write_text("{}", encoding="utf-8")
 
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=FakeVSLoader())
 
-    with pytest.raises(MetricsCalculationError, match="Cached metrics missing"):
+    with pytest.raises(MetricsCalculationError, match="No cached analysis for this selection"):
         asyncio.run(execute_run(request, deps=deps))
 
 
@@ -518,7 +727,7 @@ def test_execute_run_from_cache_only_fails_when_metrics_cache_version_mismatch(
         content=_cache_config(
             analysis="random_frame_count = 0\ndark_frame_count = 1",
             audio_alignment="enable = false",
-            screenshots='use_ffmpeg = true\nactive_rect_detection = "aspect_ratio"',
+            screenshots='active_rect_detection = "aspect_ratio"',
             report="enable = false",
         ),
     )
@@ -526,71 +735,56 @@ def test_execute_run_from_cache_only_fails_when_metrics_cache_version_mismatch(
     create_video_files(input_dir, "source.mkv")
 
     cache_dir = tmp_path / "generated" / "cache" / "analysis"
-    cache_dir.mkdir(parents=True, exist_ok=True)
     config = load_config(tmp_path / "config" / "config.toml")
     source_path = input_dir / "source.mkv"
-    write_probe_cache_for_inputs(tmp_path / "generated" / "clip_probe.toml", [source_path], config)
-    selection_domain = analysis_selection_domain_for_cache_inputs([source_path], config)
-    fingerprint = metric_cache_fingerprint(
-        video_paths=[source_path], config=config, selection_domain=selection_domain
+    write_metrics_cache(
+        cache_dir,
+        source_path=source_path,
+        video_paths=[source_path],
+        config=config,
     )
-    cache_path = cache_dir / cache_io.metrics_cache_filename([source_path], fingerprint)
-    cache_payload = {
-        "version": cache_io.CACHE_VERSION + 1,
-        "fingerprint": fingerprint,
-        "luminance": [0.1],
-        "motion": [0.2],
-        "metadata": {
-            "frame_count": 1,
-            "fps": "24",
-            "config_fingerprint": "test",
-            "clips": [
-                {
-                    "path": str(input_dir / "source.mkv"),
-                    "size": 0,
-                    "mtime": 0.0,
-                    "sha1": None,
-                }
-            ],
-            "version": cache_io.CACHE_VERSION,
-        },
-    }
+    (cache_path,) = cache_dir.glob("*.compframes")
+    cache_payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    cache_payload["version"] = cache_io.CACHE_VERSION + 1
     cache_path.write_text(json.dumps(cache_payload), encoding="utf-8")
 
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=FakeVSLoader())
 
-    with pytest.raises(CacheVersionMismatchError):
+    with pytest.raises(CacheCorruptionError) as exc:
         asyncio.run(execute_run(request, deps=deps))
+    assert exc.value.context.code == "FC-4006"
 
 
 def test_execute_run_from_cache_only_requires_probe_cache_before_alignment_when_alignment_enabled(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     config_content = _cache_config(
         analysis="random_frame_count = 0\ndark_frame_count = 1",
         audio_alignment="enable = true",
-        screenshots='use_ffmpeg = true\nactive_rect_detection = "aspect_ratio"',
+        screenshots='active_rect_detection = "aspect_ratio"',
         report="enable = false",
     )
     create_config(tmp_path, content=config_content)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "a_source.mkv", "b_comp.mkv")
 
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    deps = RunDependencies(vs_loader=FakeVSLoader())
 
-    with pytest.raises(MetricsCalculationError, match="Cached clip probe data is required"):
+    with pytest.raises(MetricsCalculationError, match="No cached analysis for this selection"):
         asyncio.run(execute_run(request, deps=deps))

@@ -1,6 +1,7 @@
 """Producer-authored warnings carried through a run without parsing display text."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Literal
 
 type WarningSource = Literal[
@@ -24,6 +25,8 @@ class RunWarning:
     severity: WarningSeverity
     message: str
     detail: str | None = None
+    comparison_path: Path | None = field(default=None, compare=False, repr=False)
+    dropped_user_frames: tuple[int, ...] = field(default=(), compare=False, repr=False)
 
     @property
     def text(self) -> str:

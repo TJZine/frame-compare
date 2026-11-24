@@ -133,10 +133,7 @@ class DuplicateSourceStemError(InputError):
             ErrorContext(
                 code="FC-3013",
                 name="DUPLICATE_SOURCE_STEM",
-                message=(
-                    f"Duplicate source stem {stem!r} is not supported until alignment "
-                    "persistence uses stable versioned source IDs."
-                ),
+                message=f"Two sources share the name {stem!r}.",
                 hint="Rename one of the source files so every discovered source stem is unique.",
                 details={
                     "stem": stem,

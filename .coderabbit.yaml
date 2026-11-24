@@ -39,16 +39,13 @@ reviews:
         Review Antigravity rules as thin pointers to AGENTS.md and .agents/project.md. Flag stale discovery names, conflicting authority, and duplicated workflow policy.
     - path: "docs/ENGINEERING_RUNBOOK.md"
       instructions: |
-        Review complete specialist verification and release procedures. Preserve required Docker, Windows, distribution, signing, and platform claims and their evidence. Generic methodology belongs to shared skills; local facts and test selection belong to .agents/project.md. Flag gaps that permit unverified claims or conflicting command ownership.
+        Review complete specialist verification and release procedures. Preserve required Docker, Windows, distribution, scan, and platform claims and their evidence. Generic methodology belongs to shared skills; local facts and test selection belong to .agents/project.md. Flag gaps that permit unverified claims or conflicting command ownership.
     - path: "docs/current-architecture.md"
       instructions: |
-        Review as present-day architecture truth. Check composition roots, import layers, persistence owners, external integration owners, runtime phase ordering, and hotspot lists. Flag stale ownership claims, missing same-pass doc updates, or changes that would let hotspots absorb new responsibilities.
+        Review as present-day architecture truth. Check composition roots, import layers, persistence owners, external integration owners, runtime phase ordering, and hotspot lists. Flag ownership claims the change makes stale, or changes that would let hotspots absorb new responsibilities.
     - path: "docs/current-cli-contract.md"
       instructions: |
-        Review as the public CLI/config contract. Flag drift in command names, option semantics, stdout/stderr behavior, JSON payloads, exit codes, path resolution, config persistence, or report auto-open rules. Ensure tests and docs stay in lockstep.
-    - path: "docs/plans/**/*.md"
-      instructions: |
-        Review tracked plans as scoped handoff memory, not global policy. Flag plans that lack explicit status, treat inactive or closed plans as current authority, duplicate runbook policy, or omit verification and rollback notes for active implementation work.
+        Review as the public CLI/config contract. Flag drift in command names, option semantics, stdout/stderr behavior, JSON payloads, exit codes, path resolution, config persistence, or report auto-open rules. Flag documented behavior that the change makes false.
     - path: ".agents/project.md"
       instructions: |
         Review as the single repository profile for shared skills. Check current source/command facts, product obligations, relevant evidence routes, and explicit limits. Existing architecture can be deliberately redesigned; equal error output alone does not prove redundant tests. Do not add model bindings, mandatory role pipelines, or duplicate authorities.
@@ -84,7 +81,7 @@ reviews:
         Review orchestration for phase ordering, cancellation/error behavior, run-folder/cache handling, typed RunContext use, and hotspot growth. Flag raw integration details or config/env policy leaking into orchestration when a lower owner should handle it.
     - path: "src/frame_compare/render/**/*.py"
       instructions: |
-        Review render changes for deterministic filenames/output, FFmpeg/VapourSynth boundary behavior, overlay correctness, resource cleanup, and runtime verification requirements. Flag tests that mock away the behavior being changed.
+        Review render changes for deterministic filenames/output, VapourSynth render behavior, overlay correctness, resource cleanup, and runtime verification requirements. Flag tests that mock away the behavior being changed.
     - path: "src/frame_compare/vs/**/*.py"
       instructions: |
         Review VapourSynth code for lazy import expectations, plugin/runtime assumptions, HDR/tonemap correctness, typed source/props handling, and honest skip/verification behavior when VS is unavailable locally.
@@ -108,10 +105,10 @@ reviews:
         Review tests for behavior-focused coverage, tmp_path isolation, declared markers, no real network in default tests, honest runtime skips, deterministic subprocess usage, and public-seam assertions. Flag brittle Rich/help snapshots, private probes, or tests that only mirror implementation.
     - path: "tests/cli/**/*.py"
       instructions: |
-        Review CLI tests for exit codes, stdout/stderr placement, JSON parsing, help semantics, config persistence, report auto-open gating, and docs lockstep with docs/current-cli-contract.md. Prefer result.stdout/result.stderr over mixed result.output when stream placement matters.
+        Review CLI tests for exit codes, stdout/stderr placement, JSON parsing, help semantics, config persistence, and report auto-open gating. Prefer result.stdout/result.stderr over mixed result.output when stream placement matters.
     - path: "tests/test_cli_contract_docs.py"
       instructions: |
-        Review as the CLI docs lockstep guard. Ensure new public CLI/config behavior is represented here when the contract doc, override map, command surface, or canonical test file list changes.
+        Review as the check that the CLI contract doc matches the override map and command surface. Ensure new public CLI/config behavior is represented here when the contract doc, override map, or command surface changes.
     - path: "tests/config/**/*.py"
       instructions: |
         Review config tests for schema validation, persistence behavior, override mapping, invalid/missing values, atomic writes, and public compatibility decisions.
@@ -120,10 +117,10 @@ reviews:
         Review integration tests for honest runtime requirements, markers, skips, fixture isolation, and real FFmpeg/VapourSynth behavior where the changed surface requires it.
     - path: "tools/windows_portable/**"
       instructions: |
-        Review Windows portable/update changes as release-path code. Flag signing/key handling risks, path quoting issues, partial update failure modes, missing PowerShell verification, and docs/CI drift.
+        Check CMD argument forwarding, PowerShell path quoting, and UTF-8 state reads under both Windows PowerShell 5.1 and PowerShell 7. Check same-volume user-data carry-over, the Leave option, external-root preservation, and registration recovery under the shared lock. Require packed ZIP lifecycle evidence on both interpreters and separate physical evidence for GPU/HDR and interactive VSView claims.
     - path: ".github/workflows/**"
       instructions: |
-        Review CI changes for parity with documented local verification, Python/uv cache safety, Docker/runtime gates, Windows portable paths, and release artifact integrity.
+        Check parity with local verification, Python/uv cache safety, and headless Docker coverage on AMD64 and ARM64. Check that the Windows scan and publisher fetch the same producer ZIP by artifact ID and verify its SHA-256 independently. Check that each release has the scanned ZIP and a matching filename-bound SHA-256 sidecar, and that PRs have read-only Windows build and scan permissions.
     - path: "Dockerfile"
       instructions: |
         Review Docker changes for reproducibility, runtime dependency correctness, FFmpeg/VapourSynth availability, cache behavior, and parity with tools/verify_docker_integration.sh.

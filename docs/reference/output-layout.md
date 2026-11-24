@@ -35,6 +35,16 @@ that Frame Compare can reuse.
 The intermediate files in a run folder vary with the enabled features. Write scripts
 that rely only on documented artifacts.
 
+Run folders combine the comparison title and short source labels, for example
+`Amber Reach S02E05 - OwL, HERON`. If the same name is already present,
+Frame Compare appends the local date and time, such as ` (2026-11-16 13.25)`.
+Source roles keep labels distinct when characters are removed or replaced to make
+a valid folder name. Long names can omit trailing source labels and show their
+count as `+N`. A single long label is shortened between words. Movie titles include
+the year when available. A derived source label that repeats the title becomes its role,
+for example `Inception (2010) - Reference`. The collision timestamp and
+`run_info.toml` creation time come from the same clock reading.
+
 ## Ownership
 
 | Path | Owner and purpose |
@@ -53,14 +63,11 @@ that rely only on documented artifacts.
 
 Files ending in `.lock` coordinate concurrent writers; leave them alone.
 
-Frame Compare writes its L-SMASH-Works `.lwi` indexes beside each source. Their filename
-includes a runtime-scoped token. Frame Compare does not adopt ambiguous legacy
-`<media>.lwi` files.
-
-When media is mounted read-only, as on the default Docker route, no index file can be
-written. A usable existing Frame Compare-owned index can still be reused. If no usable
-index is available and index construction fails, the cache-free fallback rebuilds it
-in memory each time the source loads; see [Docker](../getting-started/docker.md#the-index-warning).
+Frame Compare stores durable L-SMASH-Works indexes and their metadata in
+`cache/source-indexes/` under this generated-data root. The cache works with
+read-only media mounts when the generated root is writable. Legacy indexes beside
+media are left untouched. If the generated cache is unusable, the loader can fall
+back to indexing in memory. See [Docker](../getting-started/docker.md#the-index-warning).
 
 ## Portability
 
@@ -83,9 +90,10 @@ fresh metadata requests; Frame Compare recreates it as successful lookups occur.
 
 ## Windows portable persistence
 
-The default generated-data root can be inside the bundle. Choose an external normal
-user directory when results must survive bundle replacement. The updater, rollback,
-reinstall flow, and uninstaller preserve that external root.
+The Windows portable installer moves a non-empty bundle-local `generated/` folder
+when you install a fresh ZIP over an active bundle. Use `install.cmd -UserData Leave`
+to keep that folder in the previous bundle. Installation and uninstallation leave
+external generated-data roots in place.
 
 Moving source media or the bundle can change path-based cache identity. Existing reports
 remain viewable as long as their run folder is intact.
@@ -100,11 +108,11 @@ Mount a custom container path to a host-owned location to preserve its files.
 
 ## Cache identity caveat
 
-For performance, Frame Compare checks source freshness by path, size, and modification
-time. It does
-not hash the full source file. Frame Compare considers a replacement that preserves
-all three to be the same source. Advance the modification time or clear the relevant
-cache when such a replacement occurs.
+Analysis and alignment reuse identify sources by path, size, and modification
+time without hashing the full source file. A replacement that preserves all three
+can reuse cached data. Advance the modification time or clear the relevant cache
+when such a replacement occurs. Probe facts and decoder indexes use a stronger
+filesystem identity that includes change time for reuse between runs.
 
 For exact schemas and persistence behavior, see [Current architecture](../current-architecture.md)
 and the [CLI behavioral contract](../current-cli-contract.md).

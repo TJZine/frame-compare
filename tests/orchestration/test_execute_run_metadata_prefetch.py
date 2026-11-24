@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import tomllib
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import cast
 
@@ -15,18 +16,20 @@ from frame_compare.analysis.errors import MetricsCalculationError
 from frame_compare.config.loader import load_config
 from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.orchestration import phase_post_render, preparation
-from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
+from frame_compare.orchestration.coordinator import RunDependencies, execute_run
 from frame_compare.services.errors import TmdbError
+from frame_compare.services.release_identity import ShortNameSource
 from frame_compare.services.run_folder import RunFolderReservation
 from frame_compare.services.tmdb_cache import TmdbCache
 from frame_compare.services.types import MetadataConfig, TmdbMetadata
 from frame_compare.utils.cache_errors import CacheCorruptionError
+from tests.run_request_support import make_run_request
 
 from .execute_run_helpers import (
-    FakeFFmpegRunner,
     FakeVSLoader,
     analysis_selection_domain_for_cache_inputs,
     create_video_files,
+    install_fake_frame_render,
     metric_cache_fingerprint,
     write_probe_cache_for_inputs,
 )
@@ -75,6 +78,7 @@ def test_execute_run_from_cache_only_missing_probe_cache_skips_metadata_prefetch
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path, content=METADATA_CACHE_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
@@ -99,14 +103,14 @@ def test_execute_run_from_cache_only_missing_probe_cache_skips_metadata_prefetch
 
     monkeypatch.setattr(phase_post_render, "resolve_metadata", _resolve_metadata)
 
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=False,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    deps = RunDependencies(vs_loader=FakeVSLoader())
 
     with pytest.raises(MetricsCalculationError):
         asyncio.run(execute_run(request, deps=deps))
@@ -118,6 +122,7 @@ def test_execute_run_from_cache_only_invalid_shared_cache_skips_metadata_prefetc
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path, content=METADATA_CACHE_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
@@ -156,11 +161,13 @@ def test_execute_run_from_cache_only_invalid_shared_cache_skips_metadata_prefetc
 
     def _reserve_run_folder(
         generated_root: Path,
-        filenames: list[str],
+        sources: list[ShortNameSource],
         tmdb_metadata: TmdbMetadata | None,
+        *,
+        now: datetime,
     ) -> RunFolderReservation:
         del generated_root, tmdb_metadata
-        reserve_calls.append(filenames)
+        reserve_calls.append([source.stem for source in sources])
         return RunFolderReservation(
             path=Path("should-not-be-used"),
             folder_name="should-not-be-used",
@@ -171,14 +178,14 @@ def test_execute_run_from_cache_only_invalid_shared_cache_skips_metadata_prefetc
     monkeypatch.setattr(phase_post_render, "resolve_metadata", _resolve_metadata)
     monkeypatch.setattr(preparation, "reserve_run_folder", _reserve_run_folder)
 
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=False,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    deps = RunDependencies(vs_loader=FakeVSLoader())
 
     with pytest.raises(CacheCorruptionError):
         asyncio.run(execute_run(request, deps=deps))
@@ -190,6 +197,7 @@ def test_execute_run_persists_prefetched_tmdb_facts_from_reserved_folder(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path, content=MINIMAL_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
@@ -203,11 +211,24 @@ def test_execute_run_persists_prefetched_tmdb_facts_from_reserved_folder(
     captured_tmdb_metadata: list[TmdbMetadata | None] = []
     resolve_calls: list[list[str]] = []
     cache_paths: list[Path] = []
+    clock_reads: list[datetime] = []
+    reserved_at: list[datetime] = []
+    fixed_time = datetime.fromisoformat("2026-11-17T11:30:42-05:00")
+
+    def clock() -> datetime:
+        value = fixed_time + timedelta(seconds=len(clock_reads))
+        clock_reads.append(value)
+        return value
 
     def _capture_reserve_run_folder(
-        generated_root: Path, filenames: list[str], tmdb_metadata: TmdbMetadata | None
+        generated_root: Path,
+        sources: list[ShortNameSource],
+        tmdb_metadata: TmdbMetadata | None,
+        *,
+        now: datetime,
     ) -> RunFolderReservation:
-        del filenames
+        del sources
+        reserved_at.append(now)
         captured_tmdb_metadata.append(tmdb_metadata)
         return RunFolderReservation(
             path=generated_root / "Fight Club (1999)",
@@ -233,21 +254,25 @@ def test_execute_run_persists_prefetched_tmdb_facts_from_reserved_folder(
 
     result = asyncio.run(
         execute_run(
-            RunRequest(
+            make_run_request(
                 root=tmp_path,
                 skip_analysis=True,
                 skip_metadata=False,
-                config_overrides=CLIConfigOverrides(no_upload=True),
+                overrides=CLIConfigOverrides(no_upload=True),
             ),
-            deps=RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner()),
+            deps=RunDependencies(vs_loader=FakeVSLoader(), clock=clock),
         )
     )
 
     assert result.success is True
     assert result.screenshot_dir is not None
+    assert result.screenshot_dir is not None
     run_info = tomllib.loads(
-        (tmp_path / "generated" / "Fight Club (1999)" / "run_info.toml").read_text(encoding="utf-8")
+        (result.screenshot_dir.parent / "run_info.toml").read_text(encoding="utf-8")
     )
+    assert len(reserved_at) == 1
+    assert reserved_at[0] in clock_reads
+    assert datetime.fromisoformat(run_info["created_at"]) == reserved_at[0]
     assert run_info["source_filenames"] == ["source.mkv"]
     assert run_info["tmdb"] == {
         "enabled": True,
@@ -272,6 +297,7 @@ def test_execute_run_retries_metadata_phase_when_run_folder_prefetch_fails(
     monkeypatch: pytest.MonkeyPatch,
     unattended: bool,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(
         tmp_path,
         content=METADATA_RETRY_CONFIG.replace(
@@ -319,13 +345,13 @@ def test_execute_run_retries_metadata_phase_when_run_folder_prefetch_fails(
 
     result = asyncio.run(
         execute_run(
-            RunRequest(
+            make_run_request(
                 root=tmp_path,
                 skip_analysis=True,
                 skip_metadata=False,
-                config_overrides=CLIConfigOverrides(no_upload=True),
+                overrides=CLIConfigOverrides(no_upload=True),
             ),
-            deps=RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner()),
+            deps=RunDependencies(vs_loader=FakeVSLoader()),
         )
     )
 
@@ -339,8 +365,9 @@ def test_execute_run_retries_metadata_phase_when_run_folder_prefetch_fails(
             "error": "[FC-5005] TMDB error: temporary metadata failure\nHint: Check API key",
         }
     ]
+    assert result.screenshot_dir is not None
     run_info = tomllib.loads(
-        (tmp_path / "generated" / "source" / "run_info.toml").read_text(encoding="utf-8")
+        (result.screenshot_dir.parent / "run_info.toml").read_text(encoding="utf-8")
     )
     assert run_info["tmdb"] == {
         "enabled": True,
@@ -363,6 +390,7 @@ def test_execute_run_propagates_unexpected_run_folder_metadata_prefetch_errors(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path, content=METADATA_UNEXPECTED_ERROR_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
@@ -382,13 +410,13 @@ def test_execute_run_propagates_unexpected_run_folder_metadata_prefetch_errors(
     with pytest.raises(RuntimeError, match="unexpected metadata failure"):
         asyncio.run(
             execute_run(
-                RunRequest(
+                make_run_request(
                     root=tmp_path,
                     skip_analysis=True,
                     skip_metadata=False,
-                    config_overrides=CLIConfigOverrides(no_upload=True),
+                    overrides=CLIConfigOverrides(no_upload=True),
                 ),
-                deps=RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner()),
+                deps=RunDependencies(vs_loader=FakeVSLoader()),
             )
         )
 
@@ -396,8 +424,10 @@ def test_execute_run_propagates_unexpected_run_folder_metadata_prefetch_errors(
 @pytest.mark.parametrize("in_flight", [False, True])
 def test_interrupt_stops_tmdb_request_admission_and_cancels_inflight_http(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     in_flight: bool,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(
         tmp_path,
         content=METADATA_RETRY_CONFIG.replace(
@@ -423,15 +453,13 @@ def test_interrupt_stops_tmdb_request_admission_and_cancels_inflight_http(
             raise AssertionError("blocked HTTP request returned")
 
         async with httpx.AsyncClient(transport=httpx.MockTransport(transport)) as client:
-            request = RunRequest(
+            request = make_run_request(
                 root=tmp_path,
                 quiet=True,
                 skip_analysis=True,
-                config_overrides=CLIConfigOverrides(no_upload=True),
+                overrides=CLIConfigOverrides(no_upload=True),
             )
-            deps = RunDependencies(
-                http_client=client, vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner()
-            )
+            deps = RunDependencies(http_client=client, vs_loader=FakeVSLoader())
 
             async def run() -> None:
                 if not in_flight:

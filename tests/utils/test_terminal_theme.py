@@ -88,3 +88,14 @@ def test_result_summary_degrades_generated_punctuation_on_non_utf_stderr(
 
     assert expected in output
     assert ("?bersicht" if encoding == "ascii" else "Übersicht") in output
+
+
+def test_ascii_fallback_maps_section_and_step_map_characters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stream = io.TextIOWrapper(io.BytesIO(), encoding="ascii")
+    monkeypatch.setattr(sys, "stderr", stream)
+    use_ascii_fallback_on_non_utf_streams()
+    stream.write("╭─ │ ╰─ ● ○ · › … ×")
+    stream.flush()
+    assert stream.buffer.getvalue() == b"+- | +- * o | > ... x"

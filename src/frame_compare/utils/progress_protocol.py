@@ -6,8 +6,11 @@ from low-level modules without pulling UI dependencies at import time.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
+
+from frame_compare.utils.cancellation import is_run_interruption
 
 
 class ProgressPhaseStatus(StrEnum):
@@ -17,11 +20,61 @@ class ProgressPhaseStatus(StrEnum):
     SKIPPED = "skipped"
     WARNED = "warned"
     FAILED = "failed"
+    INTERRUPTED = "interrupted"
+
+
+def failure_progress_status(error: BaseException) -> ProgressPhaseStatus:
+    """Distinguish interruption from failure without changing the original exception."""
+    return (
+        ProgressPhaseStatus.INTERRUPTED
+        if is_run_interruption(error)
+        else ProgressPhaseStatus.FAILED
+    )
+
+
+@dataclass(frozen=True)
+class AlignmentSummaryEntry:
+    """One final source offset for human output only."""
+
+    name: str
+    offset: int | None
+    origin: str
+    audio_candidate: int | None = None
+
+    @property
+    def value(self) -> str:
+        if self.offset is None:
+            return "not applied (kept)" if self.origin == "kept" else "not applied"
+        value = f"{self.offset:+d}f"
+        if self.audio_candidate is not None and self.audio_candidate != self.offset:
+            value += f" (audio {self.audio_candidate:+d}f)"
+        return value
+
+
+@dataclass(frozen=True)
+class AlignmentSummary:
+    """Memory-only final alignment facts; never a wire or authority contract."""
+
+    entries: tuple[AlignmentSummaryEntry, ...]
+    extra_footage: str | None = None
+
+    @property
+    def common_origin(self) -> str | None:
+        origins = {entry.origin for entry in self.entries}
+        return (
+            next(iter(origins))
+            if len(origins) == 1 and all(entry.offset is not None for entry in self.entries)
+            else None
+        )
 
 
 @runtime_checkable
 class ProgressReporter(Protocol):
     """Protocol for reporting progress of long-running operations."""
+
+    def set_phase_steps(self, labels: list[str]) -> None:
+        """Set the enabled run phases in execution order for the Rich footer."""
+        ...
 
     def start_phase(self, name: str, total: int, *, presentation: str | None = None) -> None:
         """Start a new phase of the operation.
@@ -51,6 +104,7 @@ class ProgressReporter(Protocol):
         retain: bool | None = None,
         summary: str | None = None,
         duration_text: str | None = None,
+        alignment_summary: AlignmentSummary | None = None,
     ) -> None:
         """Mark the current phase as complete.
 
@@ -61,7 +115,8 @@ class ProgressReporter(Protocol):
         ``summary`` is a short human outcome shown on the durable line (only
         the Rich reporter renders it; other reporters keep their current
         content and ignore it). ``duration_text`` overrides the measured
-        duration on the durable line (likewise Rich-only).
+        duration on the durable line (likewise Rich-only). ``alignment_summary``
+        carries final alignment rows and the extra-footage note for human output.
         """
         ...
 

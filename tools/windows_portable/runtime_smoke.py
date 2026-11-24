@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.metadata
+import importlib.util
 import io
 import json
 import os
@@ -9,6 +10,14 @@ import sys
 import types
 from contextlib import redirect_stderr
 from pathlib import Path
+
+QT_FFMPEG_DLLS = {
+    "avcodec-63.dll",
+    "avformat-63.dll",
+    "avutil-61.dll",
+    "swresample-7.dll",
+    "swscale-10.dll",
+}
 
 
 def assert_true(condition: object, message: str) -> None:
@@ -31,17 +40,19 @@ def prove_package_imports() -> None:
 
 def prove_vsview_distribution_contract() -> None:
     expected = {
-        "jetpytools": "3.1.2",
-        "pyside6": "6.11.2",
-        "pyside6-addons": "6.11.2",
-        "pyside6-essentials": "6.11.2",
-        "shiboken6": "6.11.2",
-        "vapoursynth-bestsource": "22",
+        "jetpytools": "3.2.0",
+        "pyside6": "6.12.0",
+        "pyside6-addons": "6.12.0",
+        "pyside6-essentials": "6.12.0",
+        "pyside6-pdf": "6.12.0.140",
+        "pyside6-webengine": "6.12.0.140",
+        "shiboken6": "6.12.0",
+        "vapoursynth-bestsource": "23",
         "vapoursynth-lsmas": "1310.0.0.0",
         "vspackrgb": "2.0.0",
-        "vsview": "0.12.1",
-        "cyclopts": "5.2.0",
-        "vsjetengine": "1.8.0",
+        "vsview": "0.14.0",
+        "cyclopts": "5.4.2",
+        "vsjetengine": "2.0.0",
     }
     observed = {name: importlib.metadata.version(name) for name in expected}
     assert_true(observed == expected, f"VSView distribution mismatch: {observed}")
@@ -84,7 +95,10 @@ def prove_project_entrypoint_and_panel() -> None:
 
     app = QApplication.instance() or QApplication([])
     parent = QWidget()
-    panel = panel_type(parent, types.SimpleNamespace(file_path=None))
+    panel = panel_type(
+        parent,
+        types.SimpleNamespace(file_path=None, register_on_destroy=lambda cb: None),
+    )
     assert_true(
         "Inactive" in panel.progress_label.text(),
         "alignment panel is not inert outside a generated session",
@@ -117,6 +131,31 @@ def prove_qt_webengine_excluded() -> None:
     proof("qt_webengine_runtime=absent deployment=excluded")
 
 
+def read_bundle_manifest(bundle_root: Path) -> dict:
+    manifest = json.loads((bundle_root / "manifest.json").read_bytes())
+    version = manifest.get("manifest_version")
+    assert_true(type(version) is int and version in (2, 3), "unsupported portable manifest version")
+    return manifest
+
+
+def prove_embedded_python(bundle_root: Path, expected: str) -> None:
+    observed = ".".join(map(str, sys.version_info[:3]))
+    assert_true(
+        sys.implementation.name == "cpython"
+        and sys.version_info.releaselevel == "final"
+        and observed == expected,
+        f"expected embedded CPython {expected}, observed {sys.version}",
+    )
+    python_root = bundle_root / "python"
+    for name in ("_sqlite3.pyd", "sqlite3.dll"):
+        assert_true(not (python_root / name).exists(), f"unexpected embedded Python file: {name}")
+    assert_true(
+        importlib.util.find_spec("_sqlite3") is None,
+        "the SQLite extension resolved in the embedded Python environment",
+    )
+    proof(f"embedded_python={observed} sqlite=absent")
+
+
 def prove_runtime_contract() -> None:
     from frame_compare.utils.subproc import resolve_executable
     from frame_compare.vs.runtime_contract import (
@@ -145,6 +184,9 @@ def prove_runtime_contract() -> None:
     )
 
     bundle_root = Path(sys.executable).resolve().parent.parent
+    manifest = read_bundle_manifest(bundle_root)
+    if manifest["manifest_version"] == 3:
+        prove_embedded_python(bundle_root, manifest["bundle"]["python_version"])
     bundled_ffmpeg_bin = os.path.normcase(os.path.normpath(str(bundle_root / "ffmpeg" / "bin")))
     path_entries = {
         os.path.normcase(os.path.normpath(entry))
@@ -199,7 +241,7 @@ def prove_vapoursynth_environment() -> None:
     plugin_namespaces = sorted(plugin.namespace for plugin in plugins)
 
     assert_true(
-        version_major == 81 and version_minor == 0, f"expected VapourSynth R81, got {version!r}"
+        version_major == 82 and version_minor == 0, f"expected VapourSynth R82, got {version!r}"
     )
     assert_true(api_major == 4, f"expected VapourSynth API 4, got {api_version!r}")
     assert_true(api_minor == 3, f"expected VapourSynth API minor 3, got {api_version!r}")
@@ -239,7 +281,8 @@ def prove_lwlibavsource(media_path: Path) -> None:
     import vapoursynth as vs
 
     from frame_compare.vs.env import candidate_lsmas_plugin_path_details, try_load_lsmas_plugin
-    from frame_compare.vs.source import load_source, source_index_path
+    from frame_compare.vs.source import load_source
+    from frame_compare.vs.source_index_cache import ManagedSourceIndexCache
 
     core = vs.core
     lsmas_loaded_path = None
@@ -252,12 +295,20 @@ def prove_lwlibavsource(media_path: Path) -> None:
     assert_true("LibavSMASHSource" in functions, f"LibavSMASHSource missing: {sorted(functions)}")
 
     if media_path.is_file():
-        source = load_source(media_path, core=core)
+        cache = ManagedSourceIndexCache((media_path.parent / "runtime-smoke-cache").resolve())
+        source = load_source(media_path, core=core, index_cache=cache)
         frame = source.clip.get_frame(0)
         assert_true(frame.width == 64 and frame.height == 64, "LWLibavSource frame render failed")
         assert_true(source.num_frames == 3, f"unexpected source frame count: {source.num_frames}")
-        owned_index = source_index_path(media_path)
-        assert_true(owned_index.is_file(), f"runtime-specific source index missing: {owned_index}")
+        owned_index = cache.validated_index(media_path)
+        assert owned_index is not None, "managed source index missing"
+        before = owned_index.stat()
+        load_source(media_path, core=core, index_cache=cache)
+        assert_true(
+            cache.validated_index(media_path) == owned_index
+            and owned_index.stat().st_mtime_ns == before.st_mtime_ns,
+            "warm L-SMASH-Works load changed the committed index",
+        )
         assert_true(
             not Path(f"{media_path}.lwi").exists(), "legacy unversioned source index was created"
         )
@@ -305,12 +356,14 @@ def prove_placebo_tonemap_api() -> None:
     proof(f"placebo_tonemap_api=ok namespace=placebo functions={','.join(sorted(functions))}")
 
 
-def prove_placebo_tonemap_frame() -> bool:
-    from frame_compare.vs.tonemap_runtime import probe_libplacebo_runtime
+def prove_placebo_tonemap_frame(*, context: str = "standalone") -> None:
+    from frame_compare.vs.tonemap_runtime import LibplaceboProbeStatus, libplacebo_probe_status
 
-    if not probe_libplacebo_runtime():
-        proof("placebo_direct_frame=skipped reason=vulkan_runtime_unavailable")
-        return False
+    status = libplacebo_probe_status()
+    if status is LibplaceboProbeStatus.VULKAN_UNAVAILABLE:
+        proof(f"placebo_direct_frame=skipped reason=vulkan_runtime_unavailable context={context}")
+        return
+    assert_true(status is LibplaceboProbeStatus.USABLE, "libplacebo runtime probe failed")
 
     direct_out, _tonemap_clip = build_placebo_clip()
     direct_frame = direct_out.get_frame(0)
@@ -322,16 +375,16 @@ def prove_placebo_tonemap_frame() -> bool:
         "placebo unexpectedly reduced output below 10-bit",
     )
     proof(
-        f"placebo_direct_frame=ok format={direct_frame.format.name} bits={direct_frame.format.bits_per_sample}"
+        f"placebo_direct_frame=ok format={direct_frame.format.name} "
+        f"bits={direct_frame.format.bits_per_sample} context={context}"
     )
-    return True
 
 
 def prove_apply_tonemap_frame() -> None:
     import vapoursynth as vs
 
     from frame_compare.vs.tonemap import _libplacebo_runtime_usable, apply_tonemap
-    from frame_compare.vs.types import TonemapSettings
+    from frame_compare.vs.types import LibplaceboTonemap, TonemapSettings
 
     core = vs.core
     tonemap_clip = core.std.BlankClip(
@@ -341,7 +394,12 @@ def prove_apply_tonemap_frame() -> None:
 
     libplacebo_runtime_usable = _libplacebo_runtime_usable()
     app_out = apply_tonemap(tonemap_clip, TonemapSettings(enabled=True))
-    app_frame = app_out.get_frame(0)
+    assert_true(app_out.applied is not None, "apply_tonemap omitted applied facts")
+    assert_true(
+        isinstance(app_out.applied.transform, LibplaceboTonemap) == libplacebo_runtime_usable,
+        "apply_tonemap implementation does not match runtime capability",
+    )
+    app_frame = app_out.clip.get_frame(0)
     assert_true(
         app_frame.width == 16 and app_frame.height == 16, "apply_tonemap frame render failed"
     )
@@ -355,6 +413,69 @@ def prove_apply_tonemap_frame() -> None:
         f"format={app_frame.format.name} bits={app_frame.format.bits_per_sample} "
         f"fallback_aware=true libplacebo_runtime_usable={str(libplacebo_runtime_usable).lower()}"
     )
+
+
+def prove_vapoursynth_screenshot(media_path: Path) -> None:
+    import vapoursynth as vs
+    from PIL import Image
+
+    from frame_compare.config.schema import ConfigSchema, OverlayMode
+    from frame_compare.render.batch.orchestrator import render_screenshots_from_batch_detailed
+    from frame_compare.render.types import (
+        BatchRenderOptions,
+        ScreenshotBatchRequest,
+        SelectedScreenshot,
+    )
+    from frame_compare.utils.media_facts import (
+        ActivePictureFacts,
+        PresentationState,
+        SourceSignalFacts,
+    )
+    from frame_compare.vs.env import try_load_lsmas_plugin
+    from frame_compare.vs.loader import DefaultVSLoader
+    from frame_compare.vs.source_index_cache import ManagedSourceIndexCache
+
+    core = vs.core
+    if not (hasattr(core, "lsmas") and hasattr(core.lsmas, "LWLibavSource")):
+        try_load_lsmas_plugin(core)
+
+    cache_root = (media_path.parent / "runtime-smoke-cache").resolve()
+    config = ConfigSchema()
+    loader = DefaultVSLoader(index_cache=ManagedSourceIndexCache(cache_root))
+    output_dir = cache_root / "screenshots"
+    request = ScreenshotBatchRequest(
+        clip_path=media_path,
+        label="Smoke",
+        frames=(SelectedScreenshot(comparison_frame=1, source_frame=1, selection_label=None),),
+        size_bytes=media_path.stat().st_size,
+        source_resolution=(64, 64),
+        source_total_frames=3,
+        signal=SourceSignalFacts(is_hdr=False),
+        active_picture=ActivePictureFacts(0, 0, 64, 64, "full_frame", True),
+    )
+    clips = render_screenshots_from_batch_detailed(
+        [request],
+        output_dir,
+        config,
+        BatchRenderOptions(overlay_mode=OverlayMode.NONE, vs_loader=loader, parallelism=1),
+    )
+
+    assert_true(len(clips) == 1, f"expected one rendered clip, got {len(clips)}")
+    screenshots = clips[0].screenshots
+    assert_true(len(screenshots) == 1, f"expected one screenshot, got {len(screenshots)}")
+    result = screenshots[0].result
+    with Image.open(result.path) as image:
+        assert_true(image.format == "PNG", f"unexpected screenshot format: {image.format}")
+        assert_true(image.mode == "RGB", f"unexpected screenshot mode: {image.mode}")
+        assert_true(image.size == (64, 64), f"unexpected screenshot dimensions: {image.size}")
+        colors = image.getcolors(maxcolors=64 * 64)
+        assert_true(colors is not None and len(colors) >= 16, "screenshot has fewer than 16 colors")
+    presentation_state = clips[0].clip_facts.presentation_state
+    assert_true(
+        presentation_state == PresentationState.SDR,
+        f"unexpected screenshot presentation state: {presentation_state}",
+    )
+    proof("vapoursynth_screenshot=ok renderer=vapoursynth size=64x64")
 
 
 def prove_bestsource_frame(media_path: Path) -> None:
@@ -371,6 +492,7 @@ def prove_bestsource_frame(media_path: Path) -> None:
 def prove_generated_vsview_session(media_path: Path) -> None:
     import vapoursynth as vs  # noqa: I001
 
+    from frame_compare.vs.source_index_cache import ManagedSourceIndexCache
     from frame_compare.vsview.alignment_review_contract import (
         AlignmentReviewContractError,
         AlignmentReviewExpectedComparison,
@@ -384,9 +506,13 @@ def prove_generated_vsview_session(media_path: Path) -> None:
     from PySide6.QtWidgets import QApplication, QWidget
     from vsengine.loops import get_loop, set_loop
     from vsview.api import get_outputs
+    from vsview.app.outputs import VideoMetadata
     from vsview.vsenv import QtEventLoop
 
     cache_dir = media_path.parent / "runtime-smoke-cache"
+    index_cache = ManagedSourceIndexCache(cache_dir.resolve())
+    reference_index = index_cache.validated_index(media_path)
+    assert reference_index is not None, "VSView managed reference index missing"
     comparison_one_media_path = media_path.with_name("runtime-smoke-comparison-1.mp4")
     comparison_two_media_path = media_path.with_name("runtime-smoke-comparison-2.mp4")
     assert_true(
@@ -396,10 +522,6 @@ def prove_generated_vsview_session(media_path: Path) -> None:
     script_path = write_vsview_session_script(
         reference=media_path,
         comparisons=[comparison_one_media_path, comparison_two_media_path],
-        suggested_offsets_by_key={
-            f"{media_path.stem}:{comparison_one_media_path.stem}": 0,
-            f"{media_path.stem}:{comparison_two_media_path.stem}": 0,
-        },
         audio_review_by_key={
             key: json.dumps(
                 {
@@ -407,8 +529,10 @@ def prove_generated_vsview_session(media_path: Path) -> None:
                         "origin": "shared_computed_offsets",
                         "frame_offset": 0,
                     },
-                    "evidence_availability": "historical_details_unavailable",
-                    "audio_attempt": None,
+                    "decision_state": None,
+                    "candidate_offset": None,
+                    "summary_lines": ["Accepted audio alignment reused: +0f — APPLIED"],
+                    "detail_lines": ["Historical audio details unavailable."],
                 },
                 sort_keys=True,
                 separators=(",", ":"),
@@ -419,6 +543,8 @@ def prove_generated_vsview_session(media_path: Path) -> None:
             )
         },
         cache_dir=cache_dir,
+        source_indexes={media_path: reference_index},
+        source_index_generated_root=index_cache.generated_root,
         frame_props_by_stem={
             media_path.stem: {"_Matrix": 2, "_Range": 2},
             comparison_one_media_path.stem: {"_Matrix": 2, "_Range": 2},
@@ -433,7 +559,9 @@ def prove_generated_vsview_session(media_path: Path) -> None:
         diagnostics = io.StringIO()
         try:
             with redirect_stderr(diagnostics):
-                exec(compile(script_text, str(script_path), "exec"), script_module.__dict__)
+                # Exercise the session just generated from the local smoke fixture
+                # in the disposable, unprivileged build job.
+                exec(compile(script_text, str(script_path), "exec"), script_module.__dict__)  # nosec B102
         finally:
             sys.stderr.write(diagnostics.getvalue())
         assert_true(
@@ -442,6 +570,13 @@ def prove_generated_vsview_session(media_path: Path) -> None:
             "generated VSView session omitted BT.709 preview defaults",
         )
         outputs = get_outputs()
+        assert_true(
+            all(
+                isinstance(output, VideoMetadata) and output.hdr is False
+                for output in outputs.values()
+            ),
+            "alignment outputs did not reserve SDR presentation",
+        )
         names = [output.name for output in outputs.values()]
         assert_true(
             names == ["Reference", "Comparison 1", "Comparison 2"],
@@ -459,7 +594,7 @@ def prove_generated_vsview_session(media_path: Path) -> None:
                 "generated VSView output omitted BT.709 preview properties",
             )
 
-        session = alignment_review_session_from_script(script_path, require_result_absent=True)
+        session = alignment_review_session_from_script(script_path)
         candidates = tuple(
             AlignmentReviewOutputCandidate(
                 output_id=output_id,
@@ -471,6 +606,22 @@ def prove_generated_vsview_session(media_path: Path) -> None:
         workspace = parse_alignment_review_workspace_metadata(candidates)
         assert_true(
             workspace.session_id == session.session_id, "generated output/session identities differ"
+        )
+        expected_comparison_keys = {
+            f"{media_path.stem}:{comparison_one_media_path.stem}",
+            f"{media_path.stem}:{comparison_two_media_path.stem}",
+        }
+        assert_true(
+            {pair.comparison_key for pair in workspace.comparisons} == expected_comparison_keys,
+            "generated VSView comparison keys differ",
+        )
+        assert_true(
+            all(
+                pair.audio_review.current_authority.origin == "shared_computed_offsets"
+                and pair.audio_review.current_authority.frame_offset == 0
+                for pair in workspace.comparisons
+            ),
+            "generated VSView comparisons lost reused zero authority",
         )
         expected = tuple(
             AlignmentReviewExpectedComparison(
@@ -502,6 +653,7 @@ def prove_generated_vsview_session(media_path: Path) -> None:
             current_voutput=voutputs[0],
             current_frame=1,
             timeline=Timeline(),
+            register_on_destroy=lambda cb: None,
         )
         app = QApplication.instance() or QApplication([])
         previous_loop = get_loop()
@@ -512,18 +664,22 @@ def prove_generated_vsview_session(media_path: Path) -> None:
             active_panel.on_workspace_loaded()
             app.processEvents()
             assert_true(
-                active_panel.progress_label.text() == "0/3 positions captured",
+                active_panel.progress_label.text() == "0/3 frames ready",
                 "alignment panel did not start with an empty three-source lineup",
             )
-            for output_index, frame in enumerate((1, 0, 2)):
+            for selected_count, (output_index, frame) in enumerate(((1, 0), (2, 2), (0, 1))):
                 panel_api.current_voutput = voutputs[output_index]
                 panel_api.current_frame = frame
                 active_panel.on_current_voutput_changed(voutputs[output_index], output_index)
                 app.processEvents()
+                assert_true(
+                    active_panel.progress_label.text() == f"{selected_count}/3 frames ready",
+                    "navigation unexpectedly selected a frame",
+                )
+                active_panel.frame_inputs[output_index].setText(str(frame))
             assert_true(
-                active_panel.progress_label.text()
-                == "3/3 positions captured \u2014 ready to confirm",
-                "alignment panel did not record every source position",
+                active_panel.progress_label.text() == "3/3 frames ready",
+                "alignment panel did not select each explicit source number",
             )
             assert_true(
                 active_panel.use_positions_button.isEnabled(),
@@ -579,12 +735,70 @@ def prove_generated_vsview_session(media_path: Path) -> None:
     )
 
 
+def assert_qt_ffmpeg_excluded(bundle_root: Path) -> None:
+    forbidden_names = QT_FFMPEG_DLLS | {"ffmpegmediaplugin.dll"}
+    forbidden = [
+        path.relative_to(bundle_root)
+        for path in bundle_root.rglob("*")
+        if path.name.casefold() in forbidden_names and path.is_file()
+    ]
+    assert_true(not forbidden, f"Qt Multimedia FFmpeg files remain: {forbidden}")
+
+
+def assert_windows_media_plugin_loaded(bundle_root: Path) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    plugin = bundle_root / "app/site-packages/PySide6/plugins/multimedia/windowsmediaplugin.dll"
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    get_module = kernel32.GetModuleHandleW
+    get_module.argtypes = [wintypes.LPCWSTR]
+    get_module.restype = wintypes.HMODULE
+    get_module_path = kernel32.GetModuleFileNameW
+    get_module_path.argtypes = [wintypes.HMODULE, wintypes.LPWSTR, wintypes.DWORD]
+    get_module_path.restype = wintypes.DWORD
+
+    # Audio APIs can still work without a multimedia backend. Check what Qt
+    # actually loaded without loading the plugin ourselves.
+    handle = get_module(plugin.name)
+    assert_true(handle, f"Qt did not load the Windows media plugin: {plugin.name}")
+    buffer = ctypes.create_unicode_buffer(32768)
+    length = get_module_path(handle, buffer, len(buffer))
+    assert_true(0 < length < len(buffer), "could not resolve the loaded Windows media plugin")
+    assert_true(
+        Path(buffer.value).resolve() == plugin.resolve(),
+        f"Qt loaded the Windows media plugin from {buffer.value}, expected {plugin}",
+    )
+
+
+def prove_qt_windows_media_backend(bundle_root: Path) -> None:
+    assert_true(os.environ.get("QT_MEDIA_BACKEND") == "windows", "Qt media backend mismatch")
+    assert_qt_ffmpeg_excluded(bundle_root)
+    from PySide6 import QtMultimedia
+
+    devices = QtMultimedia.QMediaDevices()
+    outputs = devices.audioOutputs()
+    assert_windows_media_plugin_loaded(bundle_root)
+    default_device = devices.defaultAudioOutput()
+    audio_device = "none"
+    if not default_device.isNull():
+        audio_format = QtMultimedia.QAudioFormat()
+        audio_format.setSampleRate(48000)
+        audio_format.setChannelCount(2)
+        audio_format.setSampleFormat(QtMultimedia.QAudioFormat.SampleFormat.Int16)
+        QtMultimedia.QAudioSink(default_device, audio_format, devices)
+        audio_device = "default"
+    proof(f"qt_multimedia_backend=windows audio_device={audio_device} audio_outputs={len(outputs)}")
+
+
 def prove_vsview_runtime(media_path: Path) -> None:
     from frame_compare.vsview.launcher import preload_vapoursynth_runtime
 
     preload_vapoursynth_runtime()
     proof("vsview_runtime_preload=ok")
 
+    bundle_root = Path(sys.executable).resolve().parent.parent
+    manifest_version = read_bundle_manifest(bundle_root)["manifest_version"]
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication
@@ -593,24 +807,26 @@ def prove_vsview_runtime(media_path: Path) -> None:
     QTimer.singleShot(0, app.quit)
     assert_true(app.exec() == 0, "controlled Qt event loop failed")
     proof("pyside6_event_loop=ok platform=offscreen")
+    if manifest_version == 3:
+        prove_qt_windows_media_backend(bundle_root)
 
     import vspackrgb.rust  # noqa: F401, I001
-    import vsview  # noqa: F401
-    import vsview.app.main  # noqa: F401
+    import vsview
+    import vsview.app.main
     import vsview.cli  # noqa: F401
     from vsview import set_output  # noqa: F401
 
     proof("vsview_deep_imports=ok modules=vsview.app.main,vsview.cli,vspackrgb.rust")
-    site_packages = Path(sys.executable).resolve().parent.parent / "app" / "site-packages"
-    qt_ffmpeg_dlls = [
-        site_packages / "PySide6" / name
-        for name in ("avcodec-61.dll", "avformat-61.dll", "avutil-59.dll")
-    ]
-    assert_true(
-        all(path.is_file() for path in qt_ffmpeg_dlls),
-        f"Qt FFmpeg DLL set incomplete: {qt_ffmpeg_dlls}",
-    )
-    proof("qt_ffmpeg_runtime=ok lineage=7.1.5 dlls=avcodec-61,avformat-61,avutil-59")
+    importlib.import_module("PySide6.QtPdf")
+    proof("qt_pdf_runtime=ok deployment=retained")
+    if manifest_version == 2:
+        pyside_root = bundle_root / "app" / "site-packages" / "PySide6"
+        dlls = [pyside_root / name for name in sorted(QT_FFMPEG_DLLS)]
+        assert_true(all(path.is_file() for path in dlls), f"Qt FFmpeg DLL set incomplete: {dlls}")
+        proof(
+            "qt_ffmpeg_runtime=ok lineage=9.0.1 "
+            "dlls=avcodec-63,avformat-63,avutil-61,swresample-7,swscale-10"
+        )
     prove_qt_webengine_excluded()
     prove_vsview_distribution_contract()
     prove_project_entrypoint_and_panel()
@@ -621,7 +837,7 @@ def prove_vsview_runtime(media_path: Path) -> None:
     prove_generated_vsview_session(media_path)
     prove_placebo_tonemap_api()
     prove_apply_tonemap_frame()
-    prove_placebo_tonemap_frame()
+    prove_placebo_tonemap_frame(context="post_qt")
     proof("vsview_runtime=ok")
 
 
@@ -635,6 +851,8 @@ elif phase == "vapoursynth_environment":
     prove_vapoursynth_environment()
 elif phase == "lwlibavsource_frame":
     prove_lwlibavsource(media_path)
+elif phase == "vapoursynth_screenshot":
+    prove_vapoursynth_screenshot(media_path)
 elif phase == "placebo_tonemap_api":
     prove_placebo_tonemap_api()
 elif phase == "apply_tonemap_frame":

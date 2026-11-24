@@ -5,6 +5,8 @@ from typing import Any
 import pytest
 
 import frame_compare.runner as runner
+from frame_compare.config.loader import get_default_config
+from tests.run_request_support import make_run_request
 
 
 def test_runner_exports_public_symbols() -> None:
@@ -29,7 +31,7 @@ def test_runner_run_propagates_result(
 
     monkeypatch.setattr(runner, "execute_run", fake_execute_run, raising=False)
 
-    request = runner.RunRequest(root=Path("."))
+    request = make_run_request(config=get_default_config(), root=Path("."))
     deps = runner.RunDependencies()
 
     result = runner.run(request, dependencies=deps)
@@ -50,7 +52,7 @@ def test_runner_run_raises_when_event_loop_running(
     monkeypatch.setattr(runner, "execute_run", fake_execute_run, raising=False)
 
     async def _call_run() -> None:
-        request = runner.RunRequest(root=Path("."))
+        request = make_run_request(config=get_default_config(), root=Path("."))
         with pytest.raises(RuntimeError):
             runner.run(request)
 

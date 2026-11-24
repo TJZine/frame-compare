@@ -1,6 +1,23 @@
 """Analysis-specific exception types for Frame Compare."""
 
+from enum import Enum, auto
+
 from frame_compare.errors import ErrorContext, JSONValue, ProcessingError
+
+
+class SelectionFailureKind(Enum):
+    """Internal recovery classification; never part of public error payloads."""
+
+    UNCLASSIFIED = auto()
+    EMPTY_METRICS = auto()
+    INSUFFICIENT_METRIC_CANDIDATES = auto()
+    NO_CLIPS = auto()
+    EMPTY_SELECTION_WINDOW = auto()
+    INVALID_CLIP_FPS = auto()
+    INSUFFICIENT_RANDOM_CANDIDATES = auto()
+    NO_INITIAL_FRAMES = auto()
+    EMPTY_REFERENCE_DOMAIN = auto()
+    INSUFFICIENT_ALIGNED_CANDIDATES = auto()
 
 
 class SelectionError(ProcessingError):
@@ -12,6 +29,7 @@ class SelectionError(ProcessingError):
         requested: int,
         found: int,
         *,
+        kind: SelectionFailureKind = SelectionFailureKind.UNCLASSIFIED,
         hint: str = "Adjust selection criteria",
         details: dict[str, JSONValue] | None = None,
     ) -> None:
@@ -31,6 +49,7 @@ class SelectionError(ProcessingError):
                 details=error_details,
             )
         )
+        self.kind = kind
         self.reason = reason
         self.requested = requested
         self.found = found
@@ -47,13 +66,30 @@ class AnalysisError(ProcessingError):
 class MetricsCalculationError(AnalysisError):
     """Failed to calculate metrics (FC-4002)."""
 
-    def __init__(self, reason: str) -> None:
+    def __init__(
+        self,
+        reason: str,
+        *,
+        message: str | None = None,
+        hint: str = "Check input format compatibility",
+    ) -> None:
         super().__init__(
             ErrorContext(
                 code="FC-4002",
                 name="METRICS_CALCULATION_ERROR",
-                message=f"Metrics calculation failed: {reason}",
-                hint="Check input format compatibility",
+                message=message or f"Metrics calculation failed: {reason}",
+                hint=hint,
                 details={"reason": reason},
             )
+        )
+
+
+class AnalysisCacheMissError(MetricsCalculationError):
+    """Required analysis was unavailable in cache-only mode."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(
+            reason,
+            message="No cached analysis for this selection.",
+            hint="Run once without --from-cache-only to build the cache.",
         )

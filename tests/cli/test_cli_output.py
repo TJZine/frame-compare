@@ -10,10 +10,11 @@ from typing import Literal
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
 from rich.console import Console
+from rich.text import Text
 
 from frame_compare.cli.output import print_at_a_glance, print_result_summary
 from frame_compare.config.loader import get_default_config
-from frame_compare.config.overrides import CLIConfigOverrides
+from frame_compare.config.overrides import CLIConfigOverrides, apply_cli_overrides
 from frame_compare.config.schema import AnalysisPerformanceMode, ConfigSchema
 from frame_compare.config.schema_enums import (
     OverlayMode,
@@ -21,7 +22,8 @@ from frame_compare.config.schema_enums import (
     ScreenshotGeometryMode,
     Visibility,
 )
-from frame_compare.orchestration import RunRequest, RunResult
+from frame_compare.orchestration import RunResult
+from frame_compare.orchestration.run_inputs import AcquiredRunConfig
 from frame_compare.utils.post_upload_actions import PostUploadActionResult
 from frame_compare.utils.run_warnings import RunWarning
 
@@ -45,13 +47,18 @@ def test_unapplied_alignment_warning_preserves_adversarial_label_and_semantics()
         None,
         "computed",
         applied=False,
-        diagnostic="low_confidence",
+        diagnostic="video_check_inconclusive",
     )
     neutral_label = "Encode B"
     adversarial_label = "Encode skipped frames: because ordinary label"
     rows = [
         _warning_presentations(
-            [format_rejected_alignment_warning(result, comparison_label=label)], ()
+            [
+                format_rejected_alignment_warning(
+                    result, comparison_label=label, comparison_path=Path("cmp.mkv")
+                )
+            ],
+            (),
         )[0]
         for label in (neutral_label, adversarial_label)
     ]
@@ -63,18 +70,18 @@ def test_unapplied_alignment_warning_preserves_adversarial_label_and_semantics()
     )
     assert neutral.source == "alignment"
     assert neutral.severity == "warning"
-    assert neutral.message == "align: Encode B alignment left unapplied"
-    assert neutral.detail == (
-        "because low_confidence; rendering in best-effort reference-frame domain "
-        "without accepted alignment."
+    assert neutral.message == (
+        "Encode B: alignment not applied (video check was inconclusive); "
+        "frames use the reference's frame numbers."
     )
+    assert neutral.detail is None
     assert adversarial.message == neutral.message.replace(neutral_label, adversarial_label)
     assert adversarial_label in adversarial.message
     assert adversarial_label not in adversarial.source
-    assert adversarial.detail is not None and adversarial_label not in adversarial.detail
+    assert adversarial.detail is None
     rendered = []
     for row in rows:
-        console = Console(record=True, force_terminal=True, width=240)
+        console = Console(record=True, force_terminal=True, width=240, height=25)
         console.print(_format_warning_panel_text([row], glyphs=GLYPHS_UNICODE))
         rendered.append(console.export_text(styles=True))
     assert rendered[1] == rendered[0].replace(neutral_label, adversarial_label)
@@ -122,22 +129,6 @@ def _workspace_path(*parts: str) -> Path:
     return Path(os.path.sep, "workspace", *parts)
 
 
-def _request(
-    *,
-    no_upload: bool = False,
-    skip_analysis: bool = False,
-    no_cache: bool = False,
-    from_cache_only: bool = False,
-) -> RunRequest:
-    return RunRequest(
-        root=_workspace_path(),
-        skip_analysis=skip_analysis,
-        no_cache=no_cache,
-        from_cache_only=from_cache_only,
-        config_overrides=CLIConfigOverrides(no_upload=no_upload),
-    )
-
-
 def _missing_executable(_name: str) -> str:
     raise FileNotFoundError(_name)
 
@@ -163,17 +154,22 @@ def test_at_a_glance_prints_default_rows_without_vsview_text(
         return f"/usr/bin/{command}"
 
     config = _config()
-    config.screenshots.use_ffmpeg = True
     console = _console()
 
     monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _resolve)
 
     print_at_a_glance(
         console,
-        request=_request(no_upload=True, no_cache=no_cache, from_cache_only=from_cache_only),
-        config=config,
-        root=_workspace_path(),
-        config_path=_workspace_path("config", "config.toml"),
+        inputs=AcquiredRunConfig(
+            _workspace_path(),
+            _workspace_path("config", "config.toml"),
+            apply_cli_overrides(config, CLIConfigOverrides(no_upload=True)),
+        ),
+        no_cache=no_cache,
+        from_cache_only=from_cache_only,
+        skip_analysis=False,
+        skip_metadata=False,
+        no_upload_flag=True,
     )
 
     output = _render(console)
@@ -195,30 +191,44 @@ def test_at_a_glance_prints_default_rows_without_vsview_text(
     assert "do not reuse" in _rendered_row_value(output, "offsets")
     assert "HTML report" in output
     assert "BT.2390 reference" in _rendered_row_value(output, "tone map")
-    assert "FFmpeg" in output
+    assert any(
+        line.partition("│")[2].split() == ["Rendering", "VapourSynth"]
+        for line in output.splitlines()
+    )
     assert "disabled by --no-upload" in output
+    for label in ("after upload", "webhook", "cleanup"):
+        with pytest.raises(AssertionError, match=f"Missing row label: {label}"):
+            _rendered_row_value(output, label)
     assert "opens when done" in output
     assert "VSView" not in output
 
 
-def test_run_plan_reports_auto_renderer_when_ffmpeg_is_not_forced(
-    monkeypatch: MonkeyPatch,
-) -> None:
+def test_run_plan_omits_details_for_features_disabled_in_config() -> None:
+    config = _config()
+    config.audio_alignment.enable = False
+    config.slowpics.auto_upload = False
+    config.slowpics.open_in_browser = True
+    config.slowpics.webhook_url = "https://example.test/unused"
+    config.slowpics.delete_after_upload = True
     console = _console()
-    monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
 
     print_at_a_glance(
         console,
-        request=_request(),
-        config=_config(),
-        root=_workspace_path(),
-        config_path=_workspace_path("config", "config.toml"),
+        inputs=AcquiredRunConfig(_workspace_path(), _workspace_path("config.toml"), config),
+        no_cache=False,
+        from_cache_only=False,
+        skip_analysis=False,
+        skip_metadata=False,
+        no_upload_flag=False,
     )
 
     output = _render(console)
-    assert "Rendering" in output
-    assert "automatic" in output
-    assert "VapourSynth preferred" in output
+    for heading in ("Alignment", "Publishing"):
+        row = next(line for line in output.splitlines() if line.startswith(f"│ {heading} "))
+        assert row.split() == ["│", heading, "disabled"]
+    for label in ("tools", "offsets", "after upload", "webhook", "cleanup"):
+        with pytest.raises(AssertionError, match=f"Missing row label: {label}"):
+            _rendered_row_value(output, label)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Windows does not expose POSIX execute bits")
@@ -237,39 +247,19 @@ def test_at_a_glance_reports_non_executable_ffmpeg_override_as_unavailable(
 
     print_at_a_glance(
         console,
-        request=_request(),
-        config=_config(),
-        root=_workspace_path(),
-        config_path=_workspace_path("config", "config.toml"),
+        inputs=AcquiredRunConfig(
+            _workspace_path(),
+            _workspace_path("config", "config.toml"),
+            apply_cli_overrides(_config(), CLIConfigOverrides(no_upload=False)),
+        ),
+        no_cache=False,
+        from_cache_only=False,
+        skip_analysis=False,
+        skip_metadata=False,
+        no_upload_flag=False,
     )
 
     assert "(unavailable)" in _rendered_row_value(_render(console), "tools")
-
-
-def test_at_a_glance_marks_ffmpeg_audio_disabled_in_tools_row(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    config = _config()
-    config.audio_alignment.enable = False
-    monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
-    console = _console()
-
-    print_at_a_glance(
-        console,
-        request=_request(),
-        config=config,
-        root=_workspace_path(),
-        config_path=_workspace_path("config", "config.toml"),
-    )
-
-    output = _render(console)
-    assert "Alignment" in output
-    assert "disabled" in output
-    tools_row = _rendered_row_value(output, "tools")
-    assert "FFmpeg audio" in tools_row
-    assert "(unavailable)" not in tools_row
-    assert "not required" not in tools_row
-    assert "VSView" not in tools_row
 
 
 def test_at_a_glance_prints_previous_offsets_effective_mode(
@@ -289,10 +279,16 @@ def test_at_a_glance_prints_previous_offsets_effective_mode(
 
         print_at_a_glance(
             console,
-            request=_request(),
-            config=config,
-            root=_workspace_path(),
-            config_path=_workspace_path("config", "config.toml"),
+            inputs=AcquiredRunConfig(
+                _workspace_path(),
+                _workspace_path("config", "config.toml"),
+                apply_cli_overrides(config, CLIConfigOverrides(no_upload=False)),
+            ),
+            no_cache=False,
+            from_cache_only=False,
+            skip_analysis=False,
+            skip_metadata=False,
+            no_upload_flag=False,
         )
 
         output = _render(console)
@@ -310,10 +306,16 @@ def test_at_a_glance_marks_analysis_mode_skipped_for_this_run(
 
     print_at_a_glance(
         console,
-        request=_request(skip_analysis=True),
-        config=config,
-        root=_workspace_path(),
-        config_path=_workspace_path("config", "config.toml"),
+        inputs=AcquiredRunConfig(
+            _workspace_path(),
+            _workspace_path("config", "config.toml"),
+            apply_cli_overrides(config, CLIConfigOverrides(no_upload=False)),
+        ),
+        no_cache=False,
+        from_cache_only=False,
+        skip_analysis=True,
+        skip_metadata=False,
+        no_upload_flag=False,
     )
 
     analysis_mode_row = _rendered_row_value(_render(console), "analysis")
@@ -323,7 +325,11 @@ def test_at_a_glance_marks_analysis_mode_skipped_for_this_run(
 
 def test_at_a_glance_preserves_literal_brackets_in_dynamic_paths(
     monkeypatch: MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
+    workspace = tmp_path / "[root]"
+    workspace.mkdir()
+    relative_config = Path("config") / "[file].toml"
     config = _config()
     config.paths.input_dir = "[bold]input[end]"
     config.paths.generated_dir = "[cyan]generated[end]"
@@ -333,16 +339,22 @@ def test_at_a_glance_preserves_literal_brackets_in_dynamic_paths(
 
     print_at_a_glance(
         console,
-        request=_request(),
-        config=config,
-        root=_workspace_path("[root]"),
-        config_path=_workspace_path("config", "[file].toml"),
+        inputs=AcquiredRunConfig(
+            workspace,
+            workspace / relative_config,
+            apply_cli_overrides(config, CLIConfigOverrides(no_upload=False)),
+        ),
+        no_cache=False,
+        from_cache_only=False,
+        skip_analysis=False,
+        skip_metadata=False,
+        no_upload_flag=False,
     )
 
     output = _render(console)
     assert "root" in output
-    assert str(_workspace_path("[root]")) in output
-    assert str(_workspace_path("config", "[file].toml")) in output
+    assert str(workspace) in "".join(output.replace("│", "").split())
+    assert str(relative_config) in output
     assert "[bold]input[end]" in output
     assert "[cyan]generated[end]" in output
 
@@ -367,10 +379,16 @@ def test_at_a_glance_prints_vsview_availability_when_probe_succeeds(
 
     print_at_a_glance(
         console,
-        request=_request(),
-        config=config,
-        root=_workspace_path(),
-        config_path=_workspace_path("config", "config.toml"),
+        inputs=AcquiredRunConfig(
+            _workspace_path(),
+            _workspace_path("config", "config.toml"),
+            apply_cli_overrides(config, CLIConfigOverrides(no_upload=False)),
+        ),
+        no_cache=False,
+        from_cache_only=False,
+        skip_analysis=False,
+        skip_metadata=False,
+        no_upload_flag=False,
     )
 
     output = _render(console)
@@ -407,10 +425,16 @@ def test_at_a_glance_prints_vsview_probe_failure(monkeypatch: MonkeyPatch) -> No
 
     print_at_a_glance(
         console,
-        request=_request(),
-        config=config,
-        root=_workspace_path(),
-        config_path=_workspace_path("config", "config.toml"),
+        inputs=AcquiredRunConfig(
+            _workspace_path(),
+            _workspace_path("config", "config.toml"),
+            apply_cli_overrides(config, CLIConfigOverrides(no_upload=False)),
+        ),
+        no_cache=False,
+        from_cache_only=False,
+        skip_analysis=False,
+        skip_metadata=False,
+        no_upload_flag=False,
     )
 
     output = _render(console)
@@ -433,7 +457,7 @@ def test_run_plan_preserves_all_material_settings(monkeypatch: MonkeyPatch) -> N
     config.analysis.motion_frame_count = 4
     config.analysis.random_seed = 99
     config.analysis.performance_mode = AnalysisPerformanceMode.PERFORMANCE
-    config.analysis.ignore_lead_seconds = 2.5
+    config.analysis.ignore_lead_seconds = 0.3
     config.analysis.ignore_trail_seconds = 4.0
     config.sources.analysis_source = "fastest"
     config.screenshots.overlay_mode = OverlayMode.DIAGNOSTIC
@@ -463,10 +487,16 @@ def test_run_plan_preserves_all_material_settings(monkeypatch: MonkeyPatch) -> N
 
     print_at_a_glance(
         console,
-        request=_request(),
-        config=config,
-        root=_workspace_path(),
-        config_path=_workspace_path("config", "config.toml"),
+        inputs=AcquiredRunConfig(
+            _workspace_path(),
+            _workspace_path("config", "config.toml"),
+            apply_cli_overrides(config, CLIConfigOverrides(no_upload=False)),
+        ),
+        no_cache=False,
+        from_cache_only=False,
+        skip_analysis=False,
+        skip_metadata=False,
+        no_upload_flag=False,
     )
 
     output = _render(console)
@@ -477,7 +507,7 @@ def test_run_plan_preserves_all_material_settings(monkeypatch: MonkeyPatch) -> N
     assert "active area automatic" in _rendered_row_value(output, "geometry")
     assert "2 user · 3 random · 2 dark · 1 bright · 4 motion" in _rendered_row_value(output, "mix")
     assert "fastest source" in _rendered_row_value(output, "analysis")
-    assert "first 2.5 s · last 4.0 s" in _rendered_row_value(output, "skip")
+    assert "first 0.3 s · last 4.0 s" in _rendered_row_value(output, "skip")
     assert "ask before reusing previous offsets" in _rendered_row_value(output, "offsets")
     assert "HTML report" in output
     assert "opens when done" not in output
@@ -495,10 +525,16 @@ def test_run_plan_preserves_output_hierarchy(monkeypatch: MonkeyPatch) -> None:
 
     print_at_a_glance(
         console,
-        request=_request(),
-        config=_config(),
-        root=_workspace_path(),
-        config_path=_workspace_path("config", "config.toml"),
+        inputs=AcquiredRunConfig(
+            _workspace_path(),
+            _workspace_path("config", "config.toml"),
+            apply_cli_overrides(_config(), CLIConfigOverrides(no_upload=False)),
+        ),
+        no_cache=False,
+        from_cache_only=False,
+        skip_analysis=False,
+        skip_metadata=False,
+        no_upload_flag=False,
     )
 
     output = _render(console)
@@ -533,10 +569,16 @@ def test_run_plan_no_color_uses_native_wrapping_without_truncation(
 
     print_at_a_glance(
         console,
-        request=_request(),
-        config=config,
-        root=root,
-        config_path=root / "config" / "config.toml",
+        inputs=AcquiredRunConfig(
+            root,
+            root / "config" / "config.toml",
+            apply_cli_overrides(config, CLIConfigOverrides(no_upload=False)),
+        ),
+        no_cache=False,
+        from_cache_only=False,
+        skip_analysis=False,
+        skip_metadata=False,
+        no_upload_flag=False,
     )
 
     output = _render(console)
@@ -553,15 +595,23 @@ def test_run_plan_no_color_uses_native_wrapping_without_truncation(
 def test_run_plan_wraps_complete_key_labels_at_very_narrow_width(
     monkeypatch: MonkeyPatch,
 ) -> None:
+    config = _config()
+    config.slowpics.auto_upload = True
     console = _console_at_width(24)
     monkeypatch.setattr("frame_compare.utils.subproc.resolve_executable", _missing_executable)
 
     print_at_a_glance(
         console,
-        request=_request(),
-        config=_config(),
-        root=_workspace_path(),
-        config_path=_workspace_path("config", "config.toml"),
+        inputs=AcquiredRunConfig(
+            _workspace_path(),
+            _workspace_path("config", "config.toml"),
+            config,
+        ),
+        no_cache=False,
+        from_cache_only=False,
+        skip_analysis=False,
+        skip_metadata=False,
+        no_upload_flag=False,
     )
 
     compact_output = "".join(_render(console).replace("│", "").split())
@@ -599,7 +649,7 @@ def test_result_summary_uses_result_hierarchy_and_relative_paths() -> None:
     assert "Comparison complete" in output
     assert "12 frames" in output
     assert "2 sources" in output
-    assert "cache hit" in output
+    assert "analysis cached" in output
     assert output.index("report.html") < output.index("screenshots")
     assert "files" not in output
     assert "slow.pics" in output
@@ -627,9 +677,10 @@ def test_result_summary_counts_screenshot_files_on_disk(tmp_path: Path) -> None:
             clips_processed=2,
         ),
         quiet=False,
+        root=tmp_path,
     )
 
-    assert "3 files" in _render(console)
+    assert "screenshots  3 files" in _render(console)
 
     missing_console = _console()
     print_result_summary(
@@ -641,27 +692,49 @@ def test_result_summary_counts_screenshot_files_on_disk(tmp_path: Path) -> None:
             clips_processed=2,
         ),
         quiet=False,
+        root=tmp_path,
     )
 
-    assert "files" not in _render(missing_console)
+    missing_path = str(Path("screenshots") / "absent")
+    assert any(
+        line.split() == ["│", "screenshots", missing_path]
+        for line in _render(missing_console).splitlines()
+    )
 
 
 def test_result_summary_resolves_relative_artifact_link_against_root(
     tmp_path: Path, monkeypatch: MonkeyPatch
 ) -> None:
+    from frame_compare.utils.progress_protocol import AlignmentSummary, AlignmentSummaryEntry
+
     root = tmp_path / "workspace"
     monkeypatch.chdir(tmp_path)
     console = _console()
 
     print_result_summary(
         console,
-        result=RunResult(success=True, report_path=Path("generated") / "report.html"),
+        result=RunResult(
+            success=True,
+            report_path=Path("generated") / "report.html",
+            alignment_summary=AlignmentSummary(
+                (AlignmentSummaryEntry("Encode [red]", 2, "confirmed in VSView", 0),)
+            ),
+            alignment_diagnostics_dir=Path("generated") / "alignment [cyan]",
+        ),
         quiet=False,
         root=root,
     )
 
     expected = (root / "generated" / "report.html").as_uri()
-    assert f'href="{expected}"' in console.export_html()
+    assert f'href="{expected}"' in console.export_html(clear=False)
+
+    assert f'href="{(root / "generated" / "alignment [cyan]").as_uri()}"' in console.export_html(
+        clear=False
+    )
+    output = _render(console)
+    assert "Encode [red] +2f (audio +0f) · confirmed in VSView" in output
+    assert "alignment [cyan]" in output
+    assert output.index("report") < output.index("alignment") < output.index("diagnostics")
 
 
 def test_verbose_run_plan_path_presentation_adds_absolute_detail(
@@ -674,10 +747,16 @@ def test_verbose_run_plan_path_presentation_adds_absolute_detail(
     console = _console()
     print_at_a_glance(
         console,
-        request=_request(),
-        config=config,
-        root=root,
-        config_path=root / "config" / "config.toml",
+        inputs=AcquiredRunConfig(
+            root,
+            root / "config" / "config.toml",
+            apply_cli_overrides(config, CLIConfigOverrides(no_upload=False)),
+        ),
+        no_cache=False,
+        from_cache_only=False,
+        skip_analysis=False,
+        skip_metadata=False,
+        no_upload_flag=False,
         verbose=True,
     )
 
@@ -710,31 +789,26 @@ def test_result_summary_report_path_presentation(external: bool) -> None:
         assert f"(absolute: {report})" in output
 
 
-def test_result_summary_warning_headline_cap_and_verbose_expansion() -> None:
-    warnings = [RunWarning("sources", "warning", f"warning {index}") for index in range(1, 11)]
-    normal_console = _console()
+@pytest.mark.parametrize("verbose", [False, True])
+def test_result_summary_lists_all_distinct_warnings_without_a_category_for_one_source(
+    verbose: bool,
+) -> None:
+    console = _console()
+    warnings = [RunWarning("sources", "warning", f"warning item {index}") for index in range(10)]
     print_result_summary(
-        normal_console,
-        result=RunResult(success=True, warnings=warnings),
+        console,
+        result=RunResult(success=True, warnings=[*warnings, warnings[0]]),
         quiet=False,
+        verbose=verbose,
     )
-    normal_output = _render(normal_console)
-    assert "Comparison complete · 10 warnings" in normal_output
-    assert "warning 8" in normal_output
-    assert "warning 9" not in normal_output
-    assert "(2 more)" in normal_output
 
-    verbose_console = _console()
-    print_result_summary(
-        verbose_console,
-        result=RunResult(success=True, warnings=warnings),
-        quiet=False,
-        verbose=True,
-    )
-    verbose_output = _render(verbose_console)
-    assert "Comparison complete · 10 warnings" in verbose_output
-    assert "warning 10" in verbose_output
-    assert "(2 more)" not in verbose_output
+    output = _render(console)
+    assert "Comparison complete · 10 warnings" in output
+    _, section = output.split("Warnings", 1)
+    assert "│ sources" not in section
+    assert "hidden by source" not in section
+    for index in range(10):
+        assert section.count(f"warning item {index}") == 1
 
 
 def test_result_summary_quiet_mode_prints_only_screenshot_path_when_available() -> None:
@@ -789,8 +863,8 @@ def test_result_summary_prints_artifact_rows_and_untruncated_warnings() -> None:
 @pytest.mark.parametrize(
     ("status", "expected"),
     [
-        ("declined", ("not uploaded (declined)",)),
-        ("report_unavailable", ("upload skipped", "report confirmation was unavailable")),
+        ("declined", ()),
+        ("report_unavailable", ("upload skipped", "the report could not be confirmed")),
     ],
 )
 def test_result_summary_prints_slowpics_as_skipped(
@@ -809,7 +883,8 @@ def test_result_summary_prints_slowpics_as_skipped(
     output = _render(console)
     for fragment in expected:
         assert fragment in output
-    assert "slow.pics" in output
+    assert ("slow.pics" in output) == (status != "declined")
+    assert "not uploaded (declined)" not in output
     assert "[SKIP]" not in output
 
 
@@ -855,7 +930,7 @@ def test_result_summary_shows_followup_failure_on_row_not_in_panel() -> None:
     assert "Comparison complete · 4 warnings" in output
     assert "URL not copied" in output
     assert "action: clipboard" not in output
-    assert "failed to copy URL" not in output
+    assert output.count("failed to copy URL") == 1
     assert "alignment" in output
     assert "slow.pics" in output
     assert output.count("alignment") == 1
@@ -954,12 +1029,16 @@ def test_result_summary_uploaded_with_each_followup_failing() -> None:
     assert "no browser accepted the request" in output
     assert "not created" in output
     assert "failed to write URL shortcut Example.url: boom" in output
-    assert "delivery failed" in output
-    assert "Warnings" not in output
-    assert "failed to copy URL" not in output
+    completion, warnings = output.split("Warnings", 1)
+    assert "delivery failed" in completion
+    assert "no browser accepted the request" not in completion
+    assert "failed to write URL shortcut Example.url: boom" not in completion
+    assert "slow.pics browser:" in warnings
+    assert "slow.pics webhook: delivery failed" in warnings
+    assert output.count("failed to copy URL") == 1
 
 
-def test_result_summary_shortcut_and_webhook_warnings_are_deduplicated_on_rows() -> None:
+def test_result_summary_shortcut_and_webhook_warnings_are_deduplicated_in_warning_section() -> None:
     console = _console()
     shortcut_warning = RunWarning(
         "slow.pics",
@@ -999,11 +1078,11 @@ def test_result_summary_shortcut_and_webhook_warnings_are_deduplicated_on_rows()
     assert "Comparison complete · 2 warnings" in output
     assert "not created" in output
     assert "delivery failed" in output
-    assert "Warnings" not in output
+    _, warnings = output.split("Warnings", 1)
     assert output.count("failed to write URL shortcut Example.url: boom") == 1
-    assert output.count("delivery failed") == 1
-    assert "slow.pics shortcut:" not in output
-    assert "slow.pics webhook:" not in output
+    assert warnings.count("slow.pics webhook: delivery failed") == 1
+    assert warnings.count("slow.pics shortcut:") == 1
+    assert "│ slow.pics\n" not in warnings
 
 
 def test_result_summary_ascii_fallback_uses_ascii_glyphs() -> None:
@@ -1013,7 +1092,7 @@ def test_result_summary_ascii_fallback_uses_ascii_glyphs() -> None:
     print_result_summary(console, result=RunResult(success=True), quiet=False)
 
     stream.seek(0)
-    output = stream.read()
+    output = Text.from_ansi(stream.read()).plain
     stream.close()
     assert "+ Comparison complete" in output
     assert "✓" not in output
@@ -1138,7 +1217,8 @@ def test_result_summary_reports_skipped_analysis_cache_status() -> None:
     output = _render(console)
     assert "1 frame" in output
     assert "2 sources" in output
-    assert "cache skipped" in output
+    assert "analysis skipped" not in output
+    assert "cache skipped" not in output
     assert "miss" not in output
 
 
@@ -1189,18 +1269,18 @@ def _timed_result() -> RunResult:
                 "prompts 3.0 s",
             ),
             (),
-            id="machine-user",
+            id="phases-user",
         ),
         pytest.param(
             RunResult(success=True, duration_seconds=5.0, phase_timings={"render": 5.0}),
-            ("5.0 s total", "render 5.0 s", "machine"),
+            ("5.0 s total", "render 5.0 s", "phases"),
             ("setup", "analyze", "align", "upload", "VSView review", "prompts", "you"),
             id="partial-zero",
         ),
         pytest.param(
             RunResult(success=True, duration_seconds=2.0),
             ("2.0 s total",),
-            ("machine", "you"),
+            ("phases", "you"),
             id="all-zero",
         ),
         pytest.param(
@@ -1228,18 +1308,31 @@ def test_result_summary_time_rows(
         assert fragment not in output
 
 
-def test_post_upload_association_requires_record_equality() -> None:
-    from frame_compare.cli.output import _warning_presentations
-
+def test_warning_deduplication_includes_source() -> None:
     action_warning = RunWarning("slow.pics", "warning", "same emitted text")
     other_warning = RunWarning("history", "warning", "same emitted text")
-    assert action_warning.text == other_warning.text
-    assert action_warning != other_warning
-    rows = _warning_presentations(
-        [other_warning, replace(action_warning)],
-        (PostUploadActionResult(kind="webhook", success=False, warning=action_warning),),
+    console = _console_at_width(240)
+    print_result_summary(
+        console,
+        result=RunResult(success=True, warnings=[other_warning, replace(action_warning)]),
+        post_upload_actions=(
+            PostUploadActionResult(kind="webhook", success=False, warning=action_warning),
+        ),
+        quiet=False,
     )
-    assert [(row.source, row.action) for row in rows] == [
-        ("history", None),
-        ("slow.pics", "webhook"),
-    ]
+    output = _render(console)
+    assert output.count("same emitted text") == 2
+    assert "history" in output and "slow.pics" in output
+
+
+def test_interruption_receipt_names_both_written_caches() -> None:
+    from frame_compare.cli.output import print_interruption
+    from frame_compare.orchestration.types import InterruptedRun
+
+    console = _console_at_width(240)
+    print_interruption(
+        console,
+        InterruptedRun(phase="Render", analysis_cache_written=True, alignment_cache_written=True),
+        root=Path.cwd(),
+    )
+    assert "next run  reuses cached analysis and alignment" in _render(console)

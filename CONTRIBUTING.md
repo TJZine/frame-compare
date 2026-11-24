@@ -14,7 +14,7 @@ verification, platform, release, and durable-plan procedures.
 | `uv` | Repository-selected compatible version | Locked dependency and command execution |
 | Git | Recent release | Version control |
 | Docker | Optional for ordinary work; required for Docker/runtime changes | Integration proof |
-| PowerShell on Windows | Required for portable packaging changes | Windows build, install, update, and verification paths |
+| PowerShell on Windows | Required for portable packaging changes | Windows build, ZIP installation, and verification |
 
 ## Development setup
 
@@ -49,8 +49,14 @@ tracked `.codanna/settings.toml.in` template; never commit the rendered
 
 ## Branch and pull request workflow
 
+```text
+feature branch --squash--> vX.Y.Z --merge commit--> pre-release --merge commit--> main
+                                                   release candidate             stable
+```
+
 1. Start from the base branch named in the issue, handoff, or maintainer request.
-   Otherwise target `main`.
+   For release integration work, start from and target the active version branch.
+   Dependabot and Release Please target `pre-release`.
 2. Create a focused branch:
 
    ```bash
@@ -63,12 +69,14 @@ tracked `.codanna/settings.toml.in` template; never commit the rendered
 5. Run applicable verification from the repository profile and specialist runbook.
 6. Open a pull request against the intended integration branch.
 
-Do not assume `main`, `staging`, `cleanup`, or a version-development branch is the
-correct target when the task names another base explicitly.
+Squash feature PRs and delete their branches after merging. Use merge commits for
+version branch integration and stable promotion. Follow the
+[release branch procedure](docs/ENGINEERING_RUNBOOK.md#pre-release-and-stable-publication)
+for RC testing and promotion.
 
 ## Pull request titles
 
-Use Conventional Commit format because the squash title becomes release history:
+Use Conventional Commit format. Feature PR titles become squash commit messages.
 
 | Type | Use |
 | --- | --- |
@@ -158,9 +166,15 @@ known-current images.
 
 The verifier sets `FRAME_COMPARE_TEST_MEDIA_CACHE` to
 `/workspace/generated/test-media-cache` (host `generated/test-media-cache`) for u4
-media only. Entries use `<cache>/<generator>/<key>/`, keyed by exact generator
-source and complete FFmpeg version output. Tests use temporary symlinks, keeping
-indexes outside the cache; unset the variable for temporary generation. Run the
+media only. Entries use `<cache>/<generator>/<key>/`, keyed by exact
+`tests/integration/alignment_u4_media_recipes.py` source and complete `ffmpeg -version`
+output. Assertion-only and store-only edits retain the cache. Recipes generate on
+demand, publishing each file with temporary file + atomic replace; the complete gate
+passes `FRAME_COMPARE_U4_MEDIA_FULL=1` to generate all 37 files. Focused
+`--pytest-path` runs remain demand-driven. Temporary symlinks keep indexes outside the
+cache; unset the cache variable for lazy temporary generation. Worker stats are
+written as JSON under `FRAME_COMPARE_E2E_ARTIFACTS`; measurements live in
+`tests/integration/NOTES-u4-media-preparation.md`. Run the
 verifier one at a time from a checkout because cache pruning cannot overlap.
 CI starts cold, adds no media cache, and retains Docker `--no-cache`.
 
@@ -516,8 +530,8 @@ a noun phrase and ends with a period.
 - User pages link to Internals pages only where the reader needs exact behavior. Link to
   a specific section with its anchor when one section answers the question. Overview
   pages may link to whole Internals pages.
-- User pages never link to `docs/plans/`, `docs/reviews/`, `docs/prompts/`,
-  `docs/TODO.md`, `docs/images/README.md`, or `docs/release-evidence/`.
+- User pages never link to `docs/TODO.md`, `docs/images/README.md`, or
+  `docs/release-evidence/`.
 
 #### UI text, keys, and literals
 
@@ -560,10 +574,7 @@ they have the right to submit the work under those terms.
 
 ## Releases
 
-Release Please owns reviewed version and changelog pull requests after project
-initialization. The guarded Windows release workflow owns exact-commit publication,
-mandatory assets, checksums, update signing, and final release creation.
-
-Maintainer procedure and current branch policy live exclusively in the
-[Engineering Runbook](docs/ENGINEERING_RUNBOOK.md). Historical initial-release steps
-belong in release evidence, not this contributor onboarding guide.
+Release Please prepares version and changelog PRs on `pre-release`. The RC and
+stable workflows publish the scanned Windows ZIP and its SHA-256 file. Follow the
+[maintainer release procedure](docs/ENGINEERING_RUNBOOK.md#pre-release-and-stable-publication)
+for acceptance, promotion, and opening the next release cycle.

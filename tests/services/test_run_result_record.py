@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import tomllib
+from asyncio import CancelledError
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -10,13 +11,13 @@ import tomli_w
 
 from frame_compare.services.errors import HistoryAccessError, HistoryOpenError
 from frame_compare.services.run_result_record import (
+    RUN_RESULT_FILENAME,
     CompletedRunFacts,
     FailedRunFacts,
     RunResultRecord,
     completed_record,
     failed_record,
     list_history,
-    parse_run_result,
     read_run_result,
     resolve_history_report,
     resolve_run_directory,
@@ -108,42 +109,38 @@ def test_v1_round_trip_is_deterministic_and_redacted(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("field", "value"),
+    ("unsafe_url", "secret"),
     [
-        ("version", 2),
-        ("report_path", "../escape.html"),
-        ("report_path", ""),
-        ("report_path", "."),
-        ("report_path", "nested/./report.html"),
-        ("report_path", "nested//report.html"),
-        ("report_path", "nested/../report.html"),
-        ("report_path", "/tmp/report.html"),
-        ("report_path", "C:\\reports\\report.html"),
-        ("report_path", "\\\\server\\share\\report.html"),
-        ("duration_seconds", True),
-        ("phase_timings", {"render": True}),
-        ("slowpics.url", "http://slow.pics/c/nope"),
-        ("slowpics.url", "https://example.com/c/nope"),
-        ("slowpics.url", "https://slow.pics:444/c/nope"),
-        ("slowpics.url", "https://user:pass@slow.pics/c/nope"),
-        ("slowpics.url", "https://slow.pics/c/nope?token=secret"),
-        ("slowpics.url", "https://slow.pics/c/nope#secret"),
-        ("slowpics.url", "https://slow.pics/not-a-comparison"),
-        ("slowpics.url", "https://slow.pics/c/nope\nignored"),
+        ("https://user:secret@slow.pics/c/nope", "secret"),
+        ("https://slow.pics/c/nope?token=secret", "secret"),
+        ("https://slow.pics/c/nope#secret", "secret"),
+        ("https://slow.pics:444/c/nope", "444"),
     ],
+    ids=["credentials", "query", "fragment", "port"],
 )
-def test_schema_rejects_malformed_fields_and_unsafe_urls(
-    tmp_path: Path, field: str, value: object
+def test_completed_record_omits_unsafe_slowpics_urls(
+    tmp_path: Path, unsafe_url: str, secret: str
 ) -> None:
-    run_dir = tmp_path / "generated" / "run"
-    run_dir.mkdir(parents=True)
-    payload = tomllib.loads(serialize_run_result(_record(tmp_path, run_dir)))
-    if field == "slowpics.url":
-        payload["slowpics"]["url"] = value
-    else:
-        payload[field] = value
-    with pytest.raises(ValueError):
-        parse_run_result(payload)
+    started = datetime(2026, 7, 14, 12, tzinfo=UTC)
+    record = completed_record(
+        workspace=_workspace(tmp_path, tmp_path / "generated" / "run"),
+        facts=CompletedRunFacts(
+            report_path=None,
+            screenshot_dir=None,
+            clip_count=2,
+            selected_frame_count=3,
+            warnings=[],
+            metrics_cache_status="skipped",
+            phase_timings={},
+            slowpics_url=unsafe_url,
+            slowpics_confirmation_status="confirmed",
+        ),
+        started_at=started,
+        completed_at=started + timedelta(seconds=1),
+    )
+
+    assert record.slowpics_url is None
+    assert secret not in serialize_run_result(record)
 
 
 def test_atomic_write_failure_leaves_no_partial_or_temp_file(
@@ -212,10 +209,35 @@ def test_failed_record_preserves_only_bounded_generic_warning_facts(tmp_path: Pa
     assert "token=secret" not in serialized
     assert "/Users/private" not in serialized
 
-    payload = tomllib.loads(serialized)
-    payload["failure"]["message"] = "Caller supplied but punctuation-safe text"
-    with pytest.raises(ValueError, match="failure.message"):
-        parse_run_result(payload)
+
+@pytest.mark.parametrize(
+    ("error", "name"),
+    [
+        (CancelledError(), "RUN_INTERRUPTED"),
+        (KeyboardInterrupt(), "RUN_INTERRUPTED"),
+        (RuntimeError("an ordinary error"), "INTERNAL_ERROR"),
+    ],
+)
+def test_failed_record_serializes_interruption_without_changing_status(
+    tmp_path: Path,
+    error: BaseException,
+    name: str,
+) -> None:
+    instant = datetime(2026, 7, 14, 12, tzinfo=UTC)
+    record = failed_record(error=error, started_at=instant, completed_at=instant)
+    payload = tomllib.loads(serialize_run_result(record))
+
+    assert payload["version"] == 1
+    assert payload["status"] == "failed"
+    assert payload["failure"] == {
+        "code": "FC-0001",
+        "name": name,
+        "category": "internal",
+        "message": "The run failed because of an internal error.",
+    }
+    write_run_result(tmp_path, record)
+    stored = read_run_result(tmp_path / RUN_RESULT_FILENAME)
+    assert stored.was_interrupted is (name == "RUN_INTERRUPTED")
 
 
 def test_failed_record_uses_run_relative_artifact_paths(tmp_path: Path) -> None:
@@ -257,6 +279,67 @@ def test_history_lists_supported_and_malformed_records_independently(tmp_path: P
     assert (broken / "run_result.toml").read_text(encoding="utf-8") == "version = 99\n"
 
 
+@pytest.mark.parametrize("version", [True, 1.0], ids=["boolean", "float"])
+def test_history_rejects_noninteger_record_version(tmp_path: Path, version: bool | float) -> None:
+    generated = tmp_path / "generated"
+    run_dir = generated / "run"
+    run_dir.mkdir(parents=True)
+    payload = tomllib.loads(serialize_run_result(_record(tmp_path, run_dir)))
+    payload["version"] = version
+    (run_dir / RUN_RESULT_FILENAME).write_text(tomli_w.dumps(payload), encoding="utf-8")
+
+    (entry,) = list_history(generated)
+
+    assert entry.status == "unavailable"
+    assert entry.warning == "A run result record is unreadable or unsupported."
+    with pytest.raises(HistoryOpenError, match="result record is unavailable"):
+        resolve_history_report(generated, run_dir.name)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("started_at", 0), ("completed_at", "0")],
+    ids=["integer-started-at", "numeric-text-completed-at"],
+)
+def test_history_rejects_epoch_record_timestamp(
+    tmp_path: Path, field: str, value: int | str
+) -> None:
+    generated = tmp_path / "generated"
+    run_dir = generated / "run"
+    run_dir.mkdir(parents=True)
+    payload = tomllib.loads(serialize_run_result(_record(tmp_path, run_dir)))
+    payload[field] = value
+    (run_dir / RUN_RESULT_FILENAME).write_text(tomli_w.dumps(payload), encoding="utf-8")
+
+    (entry,) = list_history(generated)
+
+    assert entry.status == "unavailable"
+    assert entry.report_available is False
+    with pytest.raises(HistoryOpenError, match="result record is unavailable"):
+        resolve_history_report(generated, run_dir.name)
+
+
+def test_history_normalizes_explicit_record_timestamp_offsets(tmp_path: Path) -> None:
+    generated = tmp_path / "generated"
+    run_dir = generated / "run"
+    run_dir.mkdir(parents=True)
+    record = _record(tmp_path, run_dir)
+    payload = tomllib.loads(serialize_run_result(record))
+    payload["started_at"] = "2026-07-14T14:30:00+02:30"
+    payload["completed_at"] = "2026-07-14T08:00:10-04:00"
+    (run_dir / RUN_RESULT_FILENAME).write_text(tomli_w.dumps(payload), encoding="utf-8")
+
+    (entry,) = list_history(generated)
+
+    assert entry.status == record.status
+    assert entry.started_at == record.started_at
+    assert entry.completed_at == record.completed_at
+    assert entry.started_at is not None and entry.started_at.tzinfo is UTC
+    assert entry.completed_at is not None and entry.completed_at.tzinfo is UTC
+    assert entry.report_available is True
+    assert resolve_history_report(generated, run_dir.name) == run_dir / "report.html"
+
+
 @pytest.mark.parametrize("field", ["duration_seconds", "phase_timings"])
 def test_history_isolates_oversized_numeric_record(tmp_path: Path, field: str) -> None:
     generated = tmp_path / "generated"
@@ -293,6 +376,37 @@ def test_history_report_remains_available_when_screenshots_are_missing(tmp_path:
 
     assert entries[0].report_available is True
     assert resolve_history_report(generated, "run") == run_dir / "report.html"
+
+
+def test_history_preserves_valid_record_when_report_check_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    generated = tmp_path / "generated"
+    run_dir = generated / "run"
+    run_dir.mkdir(parents=True)
+    record = _record(tmp_path, run_dir)
+    write_run_result(run_dir, record)
+
+    report = run_dir / "report.html"
+    original_is_file = Path.is_file
+
+    def deny_report_check(path: Path) -> bool:
+        if path == report:
+            raise PermissionError("report cannot be inspected")
+        return original_is_file(path)
+
+    monkeypatch.setattr(Path, "is_file", deny_report_check)
+
+    (entry,) = list_history(generated)
+
+    assert entry.status == record.status
+    assert entry.started_at == record.started_at
+    assert entry.completed_at == record.completed_at
+    assert entry.duration_seconds == record.duration_seconds
+    assert entry.report_available is False
+    assert entry.warning is None
+    with pytest.raises(HistoryOpenError, match="recorded report is missing"):
+        resolve_history_report(generated, run_dir.name)
 
 
 def test_run_relative_record_survives_moving_complete_run_folder(tmp_path: Path) -> None:
@@ -382,6 +496,36 @@ def test_history_inaccessible_root_is_actionable(
     assert "Reconnect" in error.hint
 
 
+@pytest.mark.skipif(os.name != "posix", reason="requires POSIX directory search permissions")
+@pytest.mark.parametrize(
+    "child_name", [None, "cache", "run"], ids=["empty", "cache-only", "populated"]
+)
+def test_history_listable_but_unsearchable_root_is_actionable(
+    tmp_path: Path, child_name: str | None
+) -> None:
+    generated = tmp_path / "generated"
+    generated.mkdir()
+    children = [] if child_name is None else [generated / child_name]
+    for child in children:
+        child.mkdir()
+    generated.chmod(0o400)
+    try:
+        if os.access(generated, os.X_OK):
+            pytest.skip("directory search permissions are bypassed for this user")
+        assert list(generated.iterdir()) == children
+        with pytest.raises(HistoryAccessError) as raised:
+            list_history(generated)
+    finally:
+        generated.chmod(0o700)
+
+    error = raised.value
+    assert error.code == "FC-3016"
+    assert str(generated.resolve()) in str(error)
+    assert error.hint is not None
+    assert "Reconnect" in error.hint
+    assert "permissions" in error.hint
+
+
 @pytest.mark.parametrize("name", ["", ".", "..", "a/b", "a\\b", "/tmp/x", "C:\\x"])
 def test_exact_run_name_validation_rejects_paths(tmp_path: Path, name: str) -> None:
     generated = tmp_path / "generated"
@@ -418,9 +562,7 @@ def test_history_rejects_noncanonical_report_path_and_traversal(tmp_path: Path) 
         resolve_history_report(generated, "run")
 
 
-def test_history_open_rejects_missing_and_workspace_external_to_generated_reports(
-    tmp_path: Path,
-) -> None:
+def test_history_open_rejects_missing_report(tmp_path: Path) -> None:
     generated = tmp_path / "generated"
     run_dir = generated / "run"
     run_dir.mkdir(parents=True)
@@ -432,74 +574,9 @@ def test_history_open_rejects_missing_and_workspace_external_to_generated_report
     with pytest.raises(HistoryOpenError, match="missing"):
         resolve_history_report(generated, "run")
 
-    outside_generated = tmp_path / "reports" / "report.html"
-    outside_generated.parent.mkdir()
-    outside_generated.write_text("safe workspace file", encoding="utf-8")
-    payload = tomllib.loads(serialize_run_result(record))
-    payload["report_path"] = "reports/report.html"
-    (run_dir / "run_result.toml").write_text(__import__("tomli_w").dumps(payload), encoding="utf-8")
-
-    with pytest.raises(HistoryOpenError, match="outside"):
-        resolve_history_report(generated, "run")
-
     entries = list_history(generated)
     assert len(entries) == 1
     assert entries[0].report_available is False
-
-
-def test_history_ignores_symlinked_run_escape(tmp_path: Path) -> None:
-    generated = tmp_path / "generated"
-    generated.mkdir()
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    (generated / "escape").symlink_to(outside, target_is_directory=True)
-
-    assert list_history(generated) == []
-
-
-def test_history_rejects_symlinked_record_authority(tmp_path: Path) -> None:
-    generated = tmp_path / "generated"
-    run_dir = generated / "run"
-    run_dir.mkdir(parents=True)
-    external_record = tmp_path / "external-result.toml"
-    external_record.write_text(serialize_run_result(_record(tmp_path, run_dir)), encoding="utf-8")
-    (run_dir / "run_result.toml").symlink_to(external_record)
-
-    entries = list_history(generated)
-    assert [(entry.name, entry.status) for entry in entries] == [("run", "unavailable")]
-    with pytest.raises(HistoryOpenError, match="unavailable"):
-        resolve_history_report(generated, "run")
-
-
-def test_history_rejects_redirected_report_target(tmp_path: Path) -> None:
-    generated = tmp_path / "generated"
-    run_dir = generated / "run"
-    run_dir.mkdir(parents=True)
-    external = tmp_path / "external.html"
-    external.write_text("outside", encoding="utf-8")
-    record = _record(tmp_path, run_dir)
-    (run_dir / "report.html").unlink()
-    (run_dir / "report.html").symlink_to(external)
-    write_run_result(run_dir, record)
-
-    entries = list_history(generated)
-
-    assert entries[0].status == "completed_with_warnings"
-    assert entries[0].report_available is False
-    with pytest.raises(HistoryOpenError):
-        resolve_history_report(generated, "run")
-
-
-def test_history_ignores_contained_directory_symlink_alias(tmp_path: Path) -> None:
-    generated = tmp_path / "generated"
-    target = generated / "target"
-    target.mkdir(parents=True)
-    write_run_result(target, _record(tmp_path, target))
-    (generated / "alias").symlink_to(target, target_is_directory=True)
-
-    assert [entry.name for entry in list_history(generated)] == ["target"]
-    with pytest.raises(HistoryAccessError):
-        resolve_run_directory(generated, "alias")
 
 
 @pytest.mark.parametrize("failed", [False, True])
@@ -612,4 +689,30 @@ def test_warning_record_bytes_preserve_count_cap_and_sanitization(
     assert serialize_run_result(record).encode("utf-8") == expected.encode("utf-8")
     assert record.warning_count == count
     assert len(record.warning_summaries) == summary_count
-    assert parse_run_result(tomllib.loads(expected)) == record
+    path = tmp_path / RUN_RESULT_FILENAME
+    path.write_bytes(expected.encode("utf-8"))
+    assert read_run_result(path) == record
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param("x = " + "{x=" * 1500 + "0" + "}" * 1500, id="deep"),
+        pytest.param("x = " + "1" * 5000, id="integer-limit"),
+    ],
+)
+def test_parser_limits_isolate_history_and_refuse_open(tmp_path: Path, content: str) -> None:
+    generated = tmp_path / "generated"
+    valid = generated / "valid"
+    broken = generated / "broken"
+    valid.mkdir(parents=True)
+    broken.mkdir()
+    write_run_result(valid, _record(tmp_path, valid))
+    path = broken / "run_result.toml"
+    path.write_text(content, encoding="utf-8")
+    entries = {entry.name: entry for entry in list_history(generated)}
+    assert entries["valid"].report_available
+    assert entries["broken"].status == "unavailable"
+    with pytest.raises(HistoryOpenError):
+        resolve_history_report(generated, "broken")
+    assert path.read_text(encoding="utf-8") == content

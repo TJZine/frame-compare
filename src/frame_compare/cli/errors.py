@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from enum import IntEnum
+from pathlib import Path
 
 from rich.markup import escape
 
+from frame_compare.config.errors import ConfigValidationError
 from frame_compare.errors import FrameCompareError, JSONValue
 from frame_compare.utils.terminal_theme import FAIL, MUTED, WARN
 
@@ -36,7 +39,6 @@ def get_exit_code(error: FrameCompareError) -> ExitCode:
             return ExitCode.PROCESSING_ERROR
         if category == "5":
             return ExitCode.NETWORK_ERROR
-    # Unknown FrameCompareError values map to 1
     return ExitCode.GENERAL_ERROR
 
 
@@ -54,14 +56,32 @@ def format_error_console(
     if error.hint:
         output += f"  [{WARN}]Hint:[/] {escape(error.hint)}\n"
 
-    if (verbose or verbose_hint is None) and error.context.details:
-        output += f"\n  [{MUTED}]Details:[/]\n"
-        for k, v in error.context.details.items():
-            output += f"    [{MUTED}]{escape(str(k))}:[/] {escape(str(v))}\n"
-    elif error.context.details and verbose_hint is not None:
-        output += f"\n  [{MUTED}]For more details, run with {escape(verbose_hint)}[/]"
+    details = error.context.details
+    if details and any(str(value) not in error.context.message for value in details.values()):
+        if verbose or verbose_hint is None:
+            output += f"\n  [{MUTED}]Details:[/]\n"
+            for k, v in details.items():
+                output += f"    [{MUTED}]{escape(str(k))}:[/] {escape(str(v))}\n"
+        else:
+            output += f"\n  [{MUTED}]For more details, run with {escape(verbose_hint)}[/]"
 
     return output.rstrip()
+
+
+def error_display_paths(error: FrameCompareError) -> Iterator[str]:
+    """Find the paths represented by the typed error's public details."""
+    if isinstance(error, ConfigValidationError) and error.source_path is not None:
+        yield str(error.source_path)
+    for key, value in (error.context.details or {}).items():
+        if (key in {"path", "root", "selector"} or key.endswith("_path")) and isinstance(
+            value, str
+        ):
+            yield value
+            yield repr(value)
+            yield Path(value).name
+        elif key == "matches" and isinstance(value, list):
+            # Lists are rendered using their repr, with paths quoted and escaped.
+            yield from (repr(item) for item in value if isinstance(item, str))
 
 
 def format_error_json(error: FrameCompareError) -> dict[str, JSONValue]:

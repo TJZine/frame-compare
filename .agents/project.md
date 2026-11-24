@@ -13,11 +13,12 @@ baseline records this profile's provenance; it does not choose future task branc
 
 Frame Compare is a Python 3.13+ CLI-first packaged application for deterministic
 video-frame comparison, alignment, tonemapping, reports, and optional publishing.
-The installed command is `frame-compare`, owned by `frame_compare.cli.entry:app`.
+The installed command is `frame-compare`, owned by `frame_compare.cli.entry:console_main`;
+the reusable Typer application remains `frame_compare.cli.entry:app`.
 
 The supported public surfaces are documented CLI/config behavior, streams, exit
-codes, persisted/output contracts, distribution contents, and installer/update
-behavior. Importable modules are convenience surfaces unless an explicit supported
+codes, persisted/output contracts, distribution contents, and Windows ZIP installation
+and reinstallation behavior. Importable modules are convenience surfaces unless an explicit supported
 contract says otherwise; generated API documentation alone does not create a stable
 API promise. Remove obsolete internal paths when replacing a design, after checking
 real callers, plugin entry points, persisted consumers, and the authorized scope.
@@ -41,9 +42,10 @@ product requirement:
 - Subprocesses, native handles, files, and HTTP clients have explicit lifetimes,
   bounded operations, and cleanup. Respect caller-owned injected resources. Keep
   webhook transport isolated from the publishing client's state.
-- Packaged Docker and Windows runtimes are distinct support profiles. Native
-  source tests, GUI proof, unsigned artifact proof, signing, and physical-host
-  acceptance establish different claims.
+- Docker runs headless. Windows portable ZIP and source installs share activation
+  and bundle-local data carry-over. Native source tests, packaged runtime smoke,
+  packed ZIP installation under PowerShell 5.1 and 7, the immutable ZIP scan, and
+  physical Windows acceptance each establish different claims.
 
 Current module boundaries are starting evidence for design. A justified redesign
 may change them together with their callers, checks, and documentation. Do not use
@@ -62,7 +64,7 @@ runbook gate. Follow the linked section before loading a whole authority documen
 | [JSON/quiet compatibility](../docs/current-cli-contract.md#json-and-quiet-mode-compatibility), [dry run](../docs/current-cli-contract.md#dry-run-planning) | `cli/run_command.py`, `cli/dry_run.py` | `cli/test_run_json_errors.py`, `cli/test_run_dry_run.py` |
 | [Config acquisition](../docs/current-cli-contract.md#config-validation-logging-and-migration), [persistence](../docs/current-architecture.md#configuration-persistence) | `config/loader.py`, `config/persistence.py`, `config/presets.py` | `config/test_loader.py`, `config/test_presets.py` |
 | [Alignment authority](../docs/current-architecture.md#alignment-requests-and-authority) | `services/alignment_decision.py`, `services/alignment.py`, `orchestration/phase_alignment.py` | `services/test_alignment_video.py`, `orchestration/test_phase_alignment_contract.py` |
-| [Native review/evidence](../docs/current-architecture.md#alignment-evidence-reuse-and-native-review) | `utils/alignment_evidence.py`, `vsview/session_script.py`, `vsview/session_runtime.py`, `vsview/alignment_review_contract.py` | `vsview/test_session_script.py`, `vsview/test_alignment_review_contract.py` |
+| [Native review/evidence](../docs/current-architecture.md#alignment-evidence-reuse-and-native-review) | `services/alignment_evidence.py`, `services/alignment_presentation.py`, `vsview/session_script.py`, `vsview/session_runtime.py`, `vsview/alignment_review_contract.py` | `services/test_alignment_presentation.py`, `vsview/test_session_script.py`, `vsview/test_alignment_review_contract.py`, `vsview/test_alignment_review_panel.py` |
 | [Run interruption](../docs/current-cli-contract.md#run-interruption) | `utils/cancellation.py`, `render/batch/expansion.py`, `render/prepare.py` | `render/test_orchestrator.py`, `render/test_orchestrator_batch_screenshots.py` |
 | [Report viewer](../docs/current-architecture.md#report-viewer) | `services/report/` | `services/test_report_viewer_state.py`, `services/node_harness.py`, `browser/test_report_browser_smoke.py` |
 | [Shared caches](../docs/current-architecture.md#shared-caches-and-decoder-indexes), [run records](../docs/current-architecture.md#run-records-and-review-artifacts) | `analysis/cache_io.py`, `services/run_result_record.py`, `utils/atomic_write.py` | `analysis/test_cache_io.py`, `services/test_run_result_record.py` |
@@ -82,6 +84,12 @@ boundary deliberately if the design requires it rather than adding suppressions.
 
 ## Environment and verification
 
+The repository-local [verify-frame-compare](skills/verify-frame-compare/SKILL.md)
+skill owns the application user-journey map and launch/doctor/drive/evidence/cleanup
+entrypoint. Use relevant journeys for a task; it does not replace required gates
+below or imply full-map maintenance. Its native, report-transfer and Windows gaps
+remain explicit. Claude's project launcher points at this same canonical body.
+
 Use the checked-in lockfile and existing tools. Bootstrap the contributor environment
 with `uv sync --group dev --extra vsview --frozen`. Native-media availability is a
 separate capability check. A docs-only environment can be restored with
@@ -93,10 +101,10 @@ the current runbook's applicable gates; do not run every route on every edit.
 
 | Purpose | Command |
 | --- | --- |
-| Type analysis (`src` and `tests`) | `uv run --no-sync pyright --warnings` |
+| Type analysis (application, tests, alignment and analysis tier benchmarks, and `scripts/check_*.py` checks) | `uv run --no-sync pyright --warnings` |
 | Lint | `uv run --no-sync ruff check .` |
 | Formatting | `uv run --no-sync ruff format --check .` |
-| Static security gate | `uv run --no-sync bandit -c pyproject.toml -r src --severity-level medium` |
+| Maintained Python security gate | `bash tools/check_python_security.sh` |
 | Import contracts | `uv run --no-sync lint-imports --config importlinter.ini` |
 | Focused behavioral check | `uv run --no-sync pytest -q <existing-test-path-or-selection>`; replace the placeholder with the actual affected tests |
 | Full native suite | `uv run --no-sync pytest -q -n4 --dist loadgroup` |
@@ -121,7 +129,7 @@ or the routing quality of a new skill.
 
 For wheel/sdist changes use the existing distribution recipe and
 `scripts/verify_distribution.py`. For native media, VSView, Windows portable,
-updater, or signing changes load the corresponding complete runbook procedure.
+or release changes load the corresponding complete runbook procedure.
 Do not shorten those procedures into this profile or infer their result from
 native pytest. No build or verification command grants release/publication authority.
 
@@ -172,14 +180,14 @@ platform checks, so report relevant capability gaps explicitly.
 Shared skill bodies own general design, implementation, review, diagnosis, and
 evidence procedure. This profile owns local facts and common command entry points.
 The runbook owns specialist deployment/runtime verification and release procedures.
+The local application verification skill owns its user-journey map; the shared
+creation/maintenance skills own that map's deliberate lifecycle, not app facts.
 Architecture and CLI documents own their product contracts. Keep each rule in one
 authoritative place and replace duplicate prose with a direct pointer.
 
-Use an inline task record by default. A cross-session task may use one dated plan
-under `docs/plans/`; preserve the current `search.exclude: true` front matter and
-`Status: Active`/`Status: Historical` lifecycle so internal planning stays out of
-the user-documentation search index. Do not activate old plans merely because
-they exist. Record material decisions and remaining evidence gaps once.
+Use an inline task record by default. Cross-session handoffs stay in
+untracked local notes, not the tracked docs tree. Record material decisions and
+remaining evidence gaps once.
 
 Host-specific model identifiers, effort settings, permissions, and tool mappings
 belong in host configuration. Optional executor presets in `.codex/agents/*.toml`

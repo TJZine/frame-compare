@@ -10,8 +10,8 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from frame_compare.orchestration.context import ClipState
 from frame_compare.orchestration.errors import FastestAnalysisSourceError
-from frame_compare.orchestration.presentation import clip_role
 from frame_compare.orchestration.source_selection import resolve_source_selector
+from frame_compare.services.release_identity import clip_role
 from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.run_warnings import RunWarning
 

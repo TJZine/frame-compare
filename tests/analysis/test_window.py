@@ -25,6 +25,22 @@ def test_no_shared_selectable_window_raises_selection_error() -> None:
 
 
 @pytest.mark.parametrize(
+    ("lead", "trail"),
+    [(1e308, 0.0), (0.0, 1e308)],
+)
+def test_extreme_finite_exclusions_are_clamped_before_frame_conversion(
+    lead: float, trail: float
+) -> None:
+    with pytest.raises(SelectionError, match="leave no selectable frames"):
+        compute_shared_selection_window(
+            [_clip(frame_count=240)],
+            ignore_lead_seconds=lead,
+            ignore_trail_seconds=trail,
+            min_window_seconds=0.0,
+        )
+
+
+@pytest.mark.parametrize(
     "clips, lead, trail, minimum, expected_start, expected_end",
     [
         pytest.param([_clip()], 1.25, 0.0, 0.0, 30, 240, id="lead_only"),

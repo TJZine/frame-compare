@@ -1,0 +1,112 @@
+{
+  "validity": [
+    {
+      "value": "0.0.0",
+      "valid": true
+    },
+    {
+      "value": "0.8.0",
+      "valid": true
+    },
+    {
+      "value": "0.8.0rc1",
+      "valid": true
+    },
+    {
+      "value": "0.8.0rc999999999",
+      "valid": true
+    },
+    {
+      "value": "999999999.999999999.999999999",
+      "valid": true
+    },
+    {
+      "value": "1.2.3rc2",
+      "valid": true
+    },
+    {
+      "value": "",
+      "valid": false
+    },
+    {
+      "value": "1",
+      "valid": false
+    },
+    {
+      "value": "1.2",
+      "valid": false
+    },
+    {
+      "value": "01.2.3",
+      "valid": false
+    },
+    {
+      "value": "1.02.3",
+      "valid": false
+    },
+    {
+      "value": "1.2.03",
+      "valid": false
+    },
+    {
+      "value": "1.2.3rc0",
+      "valid": false
+    },
+    {
+      "value": "1.2.3rc01",
+      "valid": false
+    },
+    {
+      "value": "1.2.3RC1",
+      "valid": false
+    },
+    {
+      "value": "v1.2.3",
+      "valid": false
+    },
+    {
+      "value": "1.2.3+local",
+      "valid": false
+    },
+    {
+      "value": "1.2.3\n",
+      "valid": false
+    },
+    {
+      "value": " 1.2.3",
+      "valid": false
+    },
+    {
+      "value": "1.2.3 ",
+      "valid": false
+    },
+    {
+      "value": "1.2.٣",
+      "valid": false
+    },
+    {
+      "value": "1.2.3rc٢",
+      "valid": false
+    },
+    {
+      "value": "1.2.3rc-1",
+      "valid": false
+    },
+    {
+      "value": "1000000000.0.0",
+      "valid": true
+    },
+    {
+      "value": "1.2.3٣",
+      "valid": false
+    },
+    {
+      "value": "1.2٢.3",
+      "valid": false
+    },
+    {
+      "value": "1.2.3rc2٢",
+      "valid": false
+    }
+  ]
+}

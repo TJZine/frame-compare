@@ -1,4 +1,7 @@
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -7,13 +10,14 @@ from pytest import MonkeyPatch
 from frame_compare.analysis.errors import ExclusionRecoverySelectionError
 from frame_compare.cli.entry import app
 from frame_compare.cli.errors import ExitCode, format_error_json, get_exit_code
-from frame_compare.config.errors import ConfigNotFoundError
+from frame_compare.config.errors import ConfigNotFoundError, ConfigParseError
 from frame_compare.errors import ErrorContext, FrameCompareError
 from frame_compare.orchestration import RunDependencies, RunRequest, RunResult
 
 from .cli_helpers import (
     MINIMAL_CONFIG,
     _invoke_run_with_minimal_workspace,
+    _normalize_cli_output,
     _write_minimal_config,
     isolated_cli_filesystem,
     runner,
@@ -377,7 +381,6 @@ def test_run_json_exclusion_recovery_fails_closed_without_confirmation_dependenc
     )
 
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
-        assert dependencies is None
         raise error
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
@@ -418,7 +421,6 @@ def test_run_quiet_exclusion_recovery_fails_closed_on_stderr_without_prompt(
     )
 
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
-        assert dependencies is None
         raise error
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
@@ -607,16 +609,54 @@ def test_run_json_stale_analysis_config_keys_fail_before_runner(
     }
 
 
+@pytest.mark.parametrize(
+    ("options", "second_interrupt"),
+    [([], False), ([], True), (["--quiet"], False), (["--json"], False)],
+)
 def test_run_exit_code_is_130_on_keyboard_interrupt(
-    monkeypatch: MonkeyPatch, tmp_path: Path
+    second_interrupt: bool, options: list[str], monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:
     def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
         raise KeyboardInterrupt()
 
     monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+    if second_interrupt:
 
-    result = _invoke_run_with_minimal_workspace([], tmp_path=tmp_path, monkeypatch=monkeypatch)
+        def interrupt_summary(*_args: object, **_kwargs: object) -> None:
+            raise KeyboardInterrupt()
+
+        monkeypatch.setattr("frame_compare.cli.run_command.print_interruption", interrupt_summary)
+
+    result = _invoke_run_with_minimal_workspace(options, tmp_path=tmp_path, monkeypatch=monkeypatch)
     assert result.exit_code == int(ExitCode.INTERRUPTED)
+    if options:
+        assert result.stderr == ""
+        assert result.stdout == ""
+    elif not second_interrupt:
+        assert result.stderr.strip() == "! Interrupted"
+        assert "╰─\n\n! Interrupted" in _normalize_cli_output(result.output)
+
+
+def test_run_error_wraps_colon_after_a_full_width_config_path(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    path = Path("a" * 75 + ".toml")
+
+    def _run(_request: RunRequest, dependencies: RunDependencies | None = None) -> RunResult:
+        raise ConfigParseError(path, "invalid TOML syntax")
+
+    monkeypatch.setattr("frame_compare.cli.entry.runner.run", _run)
+    result = _invoke_run_with_minimal_workspace(
+        ["--no-color"],
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        env={"COLUMNS": "80", "TERM": "xterm-256color"},
+    )
+
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert any(str(path) in line for line in result.stderr.splitlines())
+    assert "invalid TOML syntax" in result.stderr
+    assert all(len(line) <= 80 for line in result.stderr.splitlines())
 
 
 def test_run_no_color_error_output_has_no_rich_markup(
@@ -689,3 +729,80 @@ def test_run_no_color_error_output_preserves_literal_brackets(
     assert "[red]" not in result.stderr
     assert "[yellow]" not in result.stderr
     assert "Traceback" not in result.stderr
+
+
+@pytest.mark.parametrize(
+    "source, content, code",
+    [
+        ("toml", "x = " + "{x=" * 1500 + "0" + "}" * 1500, "FC-1002"),
+        ("toml", "x = " + "1" * 5000, "FC-1002"),
+        ("env", "[" * 10000, "FC-1003"),
+        ("env", "1" * 5000, "FC-1003"),
+        ("toml", "[tmdb]\ntimeout_seconds = inf\n", "FC-1003"),
+        ("timeout-env", "inf", "FC-1003"),
+    ],
+)
+def test_run_json_reports_parser_limits_and_nonfinite_timeout(
+    tmp_path: Path, monkeypatch: MonkeyPatch, source: str, content: str, code: str
+) -> None:
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
+        root = Path("workspace")
+        path = _write_minimal_config(root)
+        if source == "toml":
+            path.write_text(content, encoding="utf-8")
+        elif source == "env":
+            monkeypatch.setenv("FRAME_COMPARE_TMDB", content)
+        else:
+            monkeypatch.setenv("FRAME_COMPARE_TMDB__TIMEOUT_SECONDS", content)
+        result = runner.invoke(app, ["run", "--root", str(root), "--json"])
+    assert result.exit_code == int(ExitCode.CONFIG_ERROR)
+    assert result.stderr == ""
+    payload = json.loads(result.stdout)
+    assert payload["success"] is False
+    assert payload["error"]["code"] == code
+
+
+@pytest.mark.parametrize(
+    "variable, content",
+    [
+        ("FRAME_COMPARE_ANALYSIS", "[" * 2000 + '{"api_key":"sentinel-deep-secret"}' + "]" * 2000),
+        ("FRAME_COMPARE_TMDB", "[" * 1000 + '{"api_key":"sentinel-deep-secret"}' + "]" * 1000),
+        (
+            "FRAME_COMPARE_TMDB",
+            '{"api_key":' + '{"nested":' * 1000 + '"sentinel-deep-secret"' + "}" * 1000 + "}",
+        ),
+    ],
+)
+def test_run_json_balanced_deep_environment_errors_at_default_recursion(
+    tmp_path: Path, variable: str, content: str
+) -> None:
+    _write_minimal_config(tmp_path)
+    env = {key: value for key, value in os.environ.items() if not key.startswith("FRAME_COMPARE_")}
+    env[variable] = content
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; assert sys.getrecursionlimit() == 1000; from frame_compare.cli.entry import app; app()",
+            "run",
+            "--root",
+            str(tmp_path),
+            "--json",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == int(ExitCode.CONFIG_ERROR), result.stderr
+    assert result.stderr == ""
+    assert "sentinel-deep-secret" not in result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["success"] is False
+    assert payload["error"]["code"] == "FC-1003"
+    validation_errors = payload["error"]["details"]["validation_errors"]
+    assert validation_errors[0]["type"] == (
+        "string_type" if content.startswith('{"api_key":') else "model_type"
+    )
+    assert "input" in validation_errors[0]
+    assert len(result.stdout) < 4000

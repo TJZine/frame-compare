@@ -9,7 +9,11 @@ Param(
   [string]$CacheDir = "",
 
   [Parameter(Mandatory = $false)]
-  [switch]$SkipSync
+  [Alias("SkipSync")]
+  [switch]$SkipPythonInstall,
+
+  [ValidateSet("Move", "Leave")]
+  [string]$UserData = "Move"
 )
 
 $ErrorActionPreference = "Stop"
@@ -142,17 +146,14 @@ if ([System.Environment]::OSVersion.Platform -ne [System.PlatformID]::Win32NT) {
   throw "install-from-source.ps1 is supported on Windows only."
 }
 
-$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\\..")).Path
+$repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\\..")).Path
 $buildScript = Join-Path $PSScriptRoot "build_portable.ps1"
 if (!(Test-Path -LiteralPath $buildScript)) {
   throw "Build script not found: $buildScript"
 }
 
-Update-ProcessPathFromRegistry
-Ensure-UvOnPath
-
 if ([string]::IsNullOrWhiteSpace($OutDir)) {
-  $OutDir = Join-Path $repoRoot "dist\\frame-compare-portable-win-x64"
+  $OutDir = Join-Path $repoRoot ("dist\frame-compare-portable-win-x64-" + [DateTime]::UtcNow.ToString("yyyyMMdd-HHmmss") + "Z")
 }
 if ([string]::IsNullOrWhiteSpace($CacheDir)) {
   $CacheDir = Join-Path $repoRoot ".portable_cache"
@@ -166,36 +167,46 @@ if (!(Test-Path -LiteralPath $manifestFullPath)) {
   throw "Manifest not found: $manifestFullPath"
 }
 
-Push-Location $repoRoot
+# The pre-build read protects the output boundary. Activation reads the pointer again
+# after the build, under the same lock, for migration and rollback.
+. (Join-Path $PSScriptRoot "portable_activation.ps1")
+$stateDirectory = Get-PortableStateDirectory
+$pointerPath = Join-Path $stateDirectory "config.json"
+Assert-NoReparsePointAncestor -Path $outDirFullPath -Label "New bundle"
+$activationLock = Open-PortableActivationLock -StateDirectory $stateDirectory
 try {
-  if (-not $SkipSync) {
-    Write-Host "Syncing dev dependencies (frozen)..."
-    uv sync --group dev --frozen
-    Assert-LastExitCode -Label "uv sync"
-  }
+  Assert-NoPendingPortableMigration -StateDirectory $stateDirectory
+  Assert-NoReparsePointAncestor -Path $pointerPath -Label "Install state"
+  $null = Get-PortableMoveSource -PointerBytes (Read-OptionalPortableFile $pointerPath) -BundleRoot $outDirFullPath
+  Push-Location -LiteralPath $repoRoot
+  try {
+    Update-ProcessPathFromRegistry
+    Ensure-UvOnPath
+    if (-not $SkipPythonInstall) {
+      Write-Host "Installing Python 3.13 for the portable build..."
+      uv python install 3.13
+      Assert-LastExitCode -Label "uv python install 3.13"
+    }
 
-  Write-Host "Building portable bundle..."
-  & $buildScript -ManifestPath $manifestFullPath -OutDir $outDirFullPath -CacheDir $cacheDirFullPath -RepoRoot $repoRoot
-  if ($null -eq $LASTEXITCODE) {
-    throw "build_portable.ps1 terminated unexpectedly."
-  }
-  Assert-LastExitCode -Label "build_portable.ps1"
+    Write-Host "Building portable bundle..."
+    & $buildScript -ManifestPath $manifestFullPath -OutDir $outDirFullPath -CacheDir $cacheDirFullPath -RepoRoot $repoRoot
+    if ($null -eq $LASTEXITCODE) { throw "build_portable.ps1 terminated unexpectedly." }
+    Assert-LastExitCode -Label "build_portable.ps1"
+    Assert-NoReparsePointAncestor -Path $outDirFullPath -Label "New bundle"
+    $activationScript = Join-Path $outDirFullPath "portable_activation.ps1"
+    Assert-NoReparsePointAncestor -Path $activationScript -Label "Bundle activation script"
+    if (!(Test-Path -LiteralPath $activationScript -PathType Leaf)) {
+      throw "Bundle activation script not found: $activationScript"
+    }
 
-  $installScript = Join-Path $outDirFullPath "install.ps1"
-  if (!(Test-Path -LiteralPath $installScript)) {
-    throw "Bundle installer not found: $installScript"
+    Write-Host "Installing shim from built bundle..."
+    . $activationScript
+    Invoke-PortableActivation -BundleRoot $outDirFullPath -StateDirectory $stateDirectory -UserData $UserData -ActivationLock $activationLock
+  } finally {
+    Pop-Location
   }
-
-  Write-Host "Installing shim from built bundle..."
-  & $installScript
-  if ($null -eq $LASTEXITCODE) {
-    throw "install.ps1 terminated unexpectedly."
-  }
-  Assert-LastExitCode -Label "install.ps1"
 } finally {
-  Pop-Location
+  $activationLock.Dispose()
 }
 
-Write-Host ""
 Write-Host "Source install complete."
-Write-Host "Open a new terminal, then run: frame-compare --help"

@@ -19,17 +19,20 @@ as a preset.
 - shared analysis, probe, and alignment caches;
 - run-local generated state.
 
-For Windows portable installs, choose a normal directory outside the replaceable bundle
-when reports and reusable state must survive a reinstall, update rollback, or bundle
-move.
+A Windows portable reinstall moves the bundle's non-empty `generated/` folder by
+default. Use `install.cmd -UserData Leave` to keep it in the active bundle when you
+switch. To use one generated-data root across bundles, set an external path in the
+config you use with both.
 
 ```toml
 [paths]
 generated_dir = "D:/FrameCompareData"
 ```
 
-Use a normal user-writable directory. The Windows updater and uninstaller leave an
-external generated-data root outside their replacement boundary.
+Choose a user-writable directory. The Windows installer and uninstaller leave
+external generated-data roots in place. Review the
+[Windows reinstall steps](../getting-started/windows-portable.md#update-behavior)
+before switching bundles.
 
 Environment variables and platform-specific path rules are documented in the
 [CLI behavioral contract](../current-cli-contract.md#shared-path-resolution-rules).
@@ -61,9 +64,11 @@ See [Output layout](../reference/output-layout.md) for ownership and portability
 frame-compare history list
 ```
 
-The list uses persisted lifecycle records and reports `completed`,
-`completed_with_warnings`, `failed`, or `unavailable` entries. It does not require the
-original media to remain at its old path.
+The table shows the run name, local date and time, source and frame counts when
+available, status, and whether a report is available. It can show `completed`,
+`completed with warnings`, `failed`, `interrupted`, or `unavailable`. Older
+interrupted runs may still show `failed`. You can list recorded runs after moving
+the original media.
 
 For structured automation:
 
@@ -115,11 +120,11 @@ manager. Keep them out of committed TOML files.
 
 ## Cache maintenance
 
-Frame Compare uses path, size, and modification time to identify sources for cache
-reuse.
-It avoids hashing multi-gigabyte media to reduce the work needed to reuse a cache. If a
-workflow replaces media while preserving all three values, clear the relevant cache or
-advance the modification time.
+Analysis and alignment reuse identify sources by path, size, and modification
+time without hashing the full source file. If a workflow replaces media while
+preserving all three values, clear the relevant cache or advance the modification
+time. Probe facts and decoder indexes use a stronger filesystem identity that
+includes change time for reuse between runs.
 
 For unmanaged native runtimes, clear generated caches and Frame Compare-owned indexes
 after replacing FFmpeg, VapourSynth, or decoder/plugin binaries outside the managed

@@ -1,5 +1,6 @@
 from dataclasses import FrozenInstanceError
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -9,13 +10,11 @@ from frame_compare.render.types import (
     BatchRenderOptions,
     EncoderSettings,
     OverlayConfig,
-    RenderedBatchResult,
     RenderedClipFacts,
 )
 from frame_compare.utils.media_facts import (
     ActivePictureFacts,
     PresentationState,
-    RenderedFrameFacts,
     RenderedGeometryFacts,
     SourceSignalFacts,
 )
@@ -39,7 +38,7 @@ def _clip_facts() -> RenderedClipFacts:
         source_total_frames=10,
         signal=SourceSignalFacts(is_hdr=False),
         presentation_state=PresentationState.SDR,
-        tonemap_settings=None,
+        tonemap=None,
         geometry=_geometry(),
     )
 
@@ -63,7 +62,7 @@ def test_overlay_config_is_immutable_and_keeps_source_domain() -> None:
         source_resolution=(1920, 1080),
         signal=SourceSignalFacts(is_hdr=False),
         presentation_state=PresentationState.SDR,
-        tonemap_settings=None,
+        tonemap=None,
         geometry=_geometry(),
         font_path=None,
     )
@@ -74,30 +73,24 @@ def test_overlay_config_is_immutable_and_keeps_source_domain() -> None:
         setattr(config, field, "changed")
 
 
-def test_rendered_batch_requires_identical_labels_and_counts() -> None:
-    with pytest.raises(ValueError, match="identical label sets"):
-        RenderedBatchResult(screenshots_by_label={"ref": []})
-
-    with pytest.raises(ValueError, match="count mismatch"):
-        RenderedBatchResult(
-            screenshots_by_label={"ref": [Path("frame.png")]},
-            frame_facts_by_label={"ref": []},
-            clip_facts_by_label={"ref": _clip_facts()},
-        )
-
-
-def test_rendered_batch_accepts_one_to_one_exact_frame_facts() -> None:
-    result = RenderedBatchResult(
-        screenshots_by_label={"ref": [Path("frame.png")]},
-        frame_facts_by_label={"ref": [RenderedFrameFacts(source_frame=3, picture_type="B")]},
-        clip_facts_by_label={"ref": _clip_facts()},
-    )
-    assert result.frame_facts_by_label["ref"][0].source_frame == 3
-
-
 def test_batch_render_options_defaults() -> None:
     options = BatchRenderOptions()
-    assert options.renderer == "auto"
     assert options.overlay_mode == OverlayMode.STANDARD
     assert options.reporter is None
-    assert options.ffmpeg_runner is None
+
+
+@pytest.mark.parametrize("frames", [(), (3,)])
+def test_prepared_clip_rejects_selection_request_disagreement(frames: tuple[int, ...]) -> None:
+    from frame_compare.render.types import EncoderSettings, PreparedClipRender, RenderRequest
+    from tests.render_test_support import selections
+
+    request = RenderRequest(
+        cast(Any, Path("clip.mkv")),
+        cast(Any, Path("clip.mkv")),
+        1,
+        Path("frame.png"),
+        None,
+        EncoderSettings(),
+    )
+    with pytest.raises(ValueError, match="one request per selected|source frame differs"):
+        PreparedClipRender("ref", _clip_facts(), selections(frames), (request,))

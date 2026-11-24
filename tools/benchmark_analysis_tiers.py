@@ -5,14 +5,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import platform
+import re
 import statistics
 import subprocess
 import sys
 import time
+from collections import Counter
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 from fractions import Fraction
 from pathlib import Path
 from typing import Any, Literal, Protocol, cast
@@ -27,7 +30,11 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 
-from frame_compare.analysis.cache_io import compute_cache_key, delete_metrics_cache_entry
+from frame_compare.analysis.cache_io import (
+    CACHE_VERSION,
+    compute_cache_key,
+    delete_metrics_cache_entry,
+)
 from frame_compare.analysis.metrics import calculate_metrics
 from frame_compare.analysis.sampling import plan_performance_bursts
 from frame_compare.analysis.selection import select_frames
@@ -61,14 +68,10 @@ from frame_compare.config.schema_enums import (
 from frame_compare.config.schema_models import SourceOverrideConfig
 from frame_compare.orchestration.context import (
     ACTIVE_RECT_RESOLUTION_ALGORITHM,
-    ClipFingerprint,
-    ClipProbeSnapshot,
     ClipState,
 )
-from frame_compare.orchestration.probing.probe_cache import (
-    compute_probe_cache_key,
-    load_clip_probe_cache,
-)
+from frame_compare.orchestration.preflight import resolve_paths
+from frame_compare.orchestration.probing.probe_cache import load_prepared_probe_snapshots
 from frame_compare.orchestration.selection_domain import (
     build_selection_domain_clips_with_diagnostics,
 )
@@ -77,14 +80,27 @@ from frame_compare.orchestration.source_selection import (
     resolve_source_selector,
 )
 from frame_compare.utils.atomic_write import write_text_atomic
+from frame_compare.utils.child_environment import diagnostic_secrets, sanitize_diagnostic
+from frame_compare.utils.subproc import SubprocessOutputLimitExceeded, run_subprocess
 from frame_compare.vs.errors import SourceLoadError
 from frame_compare.vs.loader import DefaultVSLoader
-from frame_compare.vs.source import source_index_path, validate_source_index
+from frame_compare.vs.source_index_cache import ManagedSourceIndexCache
 
 type JsonObject = dict[str, Any]
 type MetricCachePolicy = Literal["cold", "reuse"]
 
 FFPROBE_TIMEOUT_SECONDS = 120.0
+_GIT_STDOUT_BYTES = 64 * 1024
+_VERSION_STDOUT_BYTES = 16 * 1024
+_TEXT_STDERR_BYTES = 8 * 1024
+_METADATA_STDOUT_BYTES = 256 * 1024
+_FFPROBE_STDERR_BYTES = 64 * 1024
+# One million frames covers over 4.6 hours at 60 fps. The same cap applies
+# to windowed and full-source scans, independent of metadata and requested duration.
+_FRAME_SCAN_MAX_ROWS = 1_000_000
+_FRAME_ROW_MAX_BYTES = 40  # Excluding LF. Includes the timestamp and empty side-data fields.
+_FRAME_SCAN_STDOUT_BYTES = _FRAME_SCAN_MAX_ROWS * (_FRAME_ROW_MAX_BYTES + 1)
+_FRAME_ROW = re.compile(rb"([01]),(-?[0-9]+\.[0-9]+|N/A),([IPBSipb?]),*\r?")
 
 
 class _FramesReadable(Protocol):
@@ -115,11 +131,14 @@ class BenchmarkAnalysisSource:
 
     path: Path
     ordered_paths: tuple[Path, ...]
-    effective_fps: Fraction | None
+    effective_fps: Fraction
+    reference_fps: Fraction
+    effective_frame_count: int
+    trim_start_frames: int
     active_rect: BenchmarkActiveRect
     overrides_by_path: Mapping[Path, SourceOverrideConfig]
-    source_frame_count: int | None = None
-    source_fps: Fraction | None = None
+    source_frame_count: int
+    source_fps: Fraction
 
     @property
     def reference_path(self) -> Path:
@@ -134,29 +153,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     input_paths = tuple(
         path if path.is_absolute() else root / path for path in cast(Sequence[Path], args.inputs)
     )
-    config = load_config(config_path)
-    input_dir = _resolve_config_path(root, config.paths.input_dir)
-    cache_dir = args.cache_dir or (
-        _resolve_config_path(root, config.paths.generated_dir) / "cache" / "analysis"
+    _reject_output_collisions(
+        output_path=output_path,
+        input_paths=input_paths,
+        config_path=config_path,
     )
+    config = load_config(config_path)
+    workspace = resolve_paths(config, root)
+    cache_dir = args.cache_dir or workspace.shared_analysis_cache_dir
     if not cache_dir.is_absolute():
         cache_dir = root / cache_dir
 
     analysis_source = _resolve_benchmark_analysis_source(
-        root=root,
-        input_dir=input_dir,
+        cache_path=workspace.generated_root / "clip_probe.toml",
+        input_dir=workspace.input_dir,
         input_paths=input_paths,
         config=config,
     )
-    if analysis_source.source_frame_count is None:
+    if args.window_end_exclusive > analysis_source.effective_frame_count:
         raise SystemExit(
-            "An explicit production benchmark requires the selected source frame count "
-            "from generated/clip_probe.toml. Run the normal preparation path first."
-        )
-    if args.window_end_exclusive > analysis_source.source_frame_count:
-        raise SystemExit(
-            "--window-end-exclusive exceeds the selected analysis source frame count "
-            f"({analysis_source.source_frame_count})."
+            "--window-end-exclusive exceeds the selected prepared analysis frame count "
+            f"({analysis_source.effective_frame_count})."
         )
     _require_selection_coordinate_compatibility(analysis_source)
     _require_selection_domain_for_analysis_cache_identity(
@@ -166,24 +183,28 @@ def main(argv: Sequence[str] | None = None) -> int:
         active_rect_detection=config.screenshots.active_rect_detection,
     )
 
-    source_indexes = _source_index_facts(analysis_source.ordered_paths)
+    index_cache = ManagedSourceIndexCache(workspace.generated_root)
+    vs_loader = DefaultVSLoader(
+        memory_limit_mb=config.runtime.memory_limit_mb, index_cache=index_cache
+    )
+    source_indexes = _source_index_facts(analysis_source.ordered_paths, index_cache)
     selected_index = source_indexes[analysis_source.path.as_posix()]
     if args.require_warm_source_index:
         if not selected_index["detected"]:
             raise SystemExit(
                 "A warm source index was required but no Frame Compare-owned, "
-                "runtime-versioned L-SMASH-Works index was detected for "
+                "runtime-versioned L-SMASH-Works index passed validation for "
                 f"{analysis_source.path.as_posix()}"
             )
         try:
-            validate_source_index(analysis_source.path)
+            vs_loader.load(analysis_source.path)
         except SourceLoadError as error:
             raise SystemExit(f"The required warm source index is not ready: {error}") from error
 
     metric_range = MetricFrameRange(
         source_frame_count=analysis_source.source_frame_count,
-        start=args.window_start,
-        end_exclusive=args.window_end_exclusive,
+        start=analysis_source.trim_start_frames + args.window_start,
+        end_exclusive=analysis_source.trim_start_frames + args.window_end_exclusive,
     )
     quality, performance = _run_benchmark(
         video_paths=analysis_source.ordered_paths,
@@ -191,12 +212,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         cache_dir=cache_dir,
         analysis_source_path=analysis_source.path,
         effective_fps=analysis_source.effective_fps,
+        reference_fps=analysis_source.reference_fps,
         active_rect=analysis_source.active_rect,
         selection_domain=args.selection_domain,
         metric_frame_range=metric_range,
         progress_enabled=not args.no_progress,
         repetitions=args.repetitions,
         metric_cache_policy=cast(MetricCachePolicy, args.metric_cache_policy),
+        vs_loader=vs_loader,
     )
     comparison = _compare_modes(quality=quality, performance=performance, config=config.analysis)
     source_probe = _probe_source_facts(
@@ -224,11 +247,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "config_path": config_path.as_posix(),
             "analysis_source": config.sources.analysis_source,
             "analysis_source_path": analysis_source.path.as_posix(),
-            "effective_fps": (
-                None
-                if analysis_source.effective_fps is None
-                else str(analysis_source.effective_fps)
-            ),
+            "effective_fps": str(analysis_source.effective_fps),
             "metric_active_rect": _metric_active_rect_json(analysis_source.active_rect.rect),
             "active_rect_source": analysis_source.active_rect.source,
             "active_rect_detection_mode": analysis_source.active_rect.detection_mode,
@@ -259,7 +278,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "decode_baseline": (
             None
             if args.skip_decode_baseline
-            else _run_decode_baseline(analysis_source_path=analysis_source.path)
+            else _run_decode_baseline(
+                analysis_source_path=analysis_source.path, vs_loader=vs_loader
+            )
         ),
         "quality": _tier_summary(quality),
         "comparisons": {"performance": comparison},
@@ -294,8 +315,21 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Optional prepared orchestration selection-domain token for cache identity.",
     )
-    parser.add_argument("--window-start", type=int, default=0)
-    parser.add_argument("--window-end-exclusive", type=int, required=True)
+    parser.add_argument(
+        "--window-start",
+        type=int,
+        default=0,
+        help="Inclusive start in the prepared analysis clip after source trims.",
+    )
+    parser.add_argument(
+        "--window-end-exclusive",
+        type=int,
+        required=True,
+        help=(
+            "Exclusive end in the prepared analysis clip after source trims; "
+            "reported ranges remain source-frame coordinates."
+        ),
+    )
     parser.add_argument("--no-progress", action="store_true")
     parser.add_argument("--repetitions", type=int, default=3)
     parser.add_argument("--metric-cache-policy", choices=["cold", "reuse"], default="cold")
@@ -315,6 +349,34 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return args
 
 
+def _reject_output_collisions(
+    *, output_path: Path, input_paths: Sequence[Path], config_path: Path
+) -> None:
+    """Reject destructive report destinations before preparation or trials."""
+    collisions = [
+        path for path in (*input_paths, config_path) if _paths_identify_same_file(output_path, path)
+    ]
+    if collisions:
+        output_resolved = output_path.resolve()
+        names = ", ".join(path.as_posix() for path in collisions)
+        raise SystemExit(
+            "--output must not resolve to an input or the selected config: "
+            f"{output_resolved.as_posix()} ({names})"
+        )
+
+
+def _paths_identify_same_file(left: Path, right: Path) -> bool:
+    """Match lexical aliases and existing-file identities without hiding I/O errors."""
+    if left.resolve() == right.resolve():
+        return True
+    try:
+        left_stat = left.stat()
+        right_stat = right.stat()
+    except FileNotFoundError:
+        return False
+    return os.path.samestat(left_stat, right_stat)
+
+
 def _run_benchmark(
     *,
     video_paths: Sequence[Path],
@@ -322,12 +384,14 @@ def _run_benchmark(
     cache_dir: Path,
     analysis_source_path: Path,
     effective_fps: Fraction | None,
+    reference_fps: Fraction,
     active_rect: BenchmarkActiveRect,
     selection_domain: str | None,
     metric_frame_range: MetricFrameRange,
     progress_enabled: bool,
     repetitions: int,
     metric_cache_policy: MetricCachePolicy,
+    vs_loader: DefaultVSLoader,
 ) -> tuple[JsonObject, JsonObject]:
     trials: dict[str, list[JsonObject]] = {"quality": [], "performance": []}
     progress = Progress(
@@ -355,12 +419,14 @@ def _run_benchmark(
                         cache_dir=cache_dir,
                         analysis_source_path=analysis_source_path,
                         effective_fps=effective_fps,
+                        reference_fps=reference_fps,
                         active_rect=active_rect,
                         selection_domain=selection_domain,
                         metric_frame_range=metric_frame_range,
                         metric_cache_policy=metric_cache_policy,
                         repetition=repetition,
                         order_index=order_index,
+                        vs_loader=vs_loader,
                     )
                 )
                 progress.advance(task)
@@ -380,44 +446,47 @@ def _run_tier(
     cache_dir: Path,
     analysis_source_path: Path,
     effective_fps: Fraction | None,
+    reference_fps: Fraction,
     active_rect: BenchmarkActiveRect,
     selection_domain: str | None,
     metric_frame_range: MetricFrameRange,
     metric_cache_policy: MetricCachePolicy,
     repetition: int,
     order_index: int,
+    vs_loader: DefaultVSLoader | None = None,
 ) -> JsonObject:
     tier_config = analysis_config.model_copy(
         update={"performance_mode": AnalysisPerformanceMode(mode)}
     )
+    metric_request = MetricCacheRequest(
+        analysis_source_path=analysis_source_path,
+        metric_frame_range=metric_frame_range,
+        effective_fps=effective_fps,
+        metric_active_rect=active_rect.rect,
+        active_rect_source=active_rect.source,
+        active_rect_detection_mode=active_rect.detection_mode,
+        active_rect_algorithm_id=active_rect.algorithm_id,
+    )
     if metric_cache_policy == "cold":
         _delete_tier_metrics_cache(
+            metric_request,
             video_paths=video_paths,
             config=tier_config,
             cache_dir=cache_dir,
-            analysis_source_path=analysis_source_path,
-            effective_fps=effective_fps,
-            active_rect=active_rect,
             selection_domain=selection_domain,
-            metric_frame_range=metric_frame_range,
         )
     recorder = AnalysisTimingRecorder()
     cpu_started = time.process_time()
     trial_started = time.perf_counter()
     analyze_started = time.perf_counter()
     acquisition = calculate_metrics(
-        list(video_paths),
-        tier_config,
-        cache_dir,
-        analysis_source_path=analysis_source_path,
-        effective_fps=effective_fps,
-        metric_active_rect=active_rect.rect,
-        metric_frame_range=metric_frame_range,
-        active_rect_source=active_rect.source,
-        active_rect_detection_mode=active_rect.detection_mode,
-        active_rect_algorithm_id=active_rect.algorithm_id,
+        metric_request,
         selection_domain=selection_domain,
         timing_recorder=recorder,
+        video_paths=list(video_paths),
+        config=tier_config,
+        cache_dir=cache_dir,
+        vs_loader=vs_loader,
     )
     metrics = acquisition.metrics
     analyze_seconds = time.perf_counter() - analyze_started
@@ -436,6 +505,7 @@ def _run_tier(
             window_start=metric_frame_range.start,
             window_end=metric_frame_range.end_exclusive,
         ),
+        selection_fps=reference_fps,
     )
     selection = _selection_with_offset(selection, metric_frame_range.start)
     selection_seconds = time.perf_counter() - selection_started
@@ -849,7 +919,7 @@ def _metrics_metadata_json(metrics: FrameMetrics) -> JsonObject:
         "algorithm_id": metadata.algorithm_id,
         "metric_backend": metadata.metric_backend,
         "algorithm_identity_json": metadata.algorithm_identity_json,
-        "cache_version": metadata.version,
+        "cache_version": CACHE_VERSION,
     }
 
 
@@ -913,29 +983,15 @@ def _selection_with_offset(selection: FrameSelection, offset: int) -> FrameSelec
 
 
 def _delete_tier_metrics_cache(
+    request: MetricCacheRequest,
     *,
     video_paths: Sequence[Path],
     config: AnalysisConfig,
     cache_dir: Path,
-    analysis_source_path: Path,
-    effective_fps: Fraction | None,
-    active_rect: BenchmarkActiveRect,
     selection_domain: str | None,
-    metric_frame_range: MetricFrameRange,
 ) -> None:
     key = compute_cache_key(
-        list(video_paths),
-        config,
-        selection_domain=selection_domain,
-        metric_request=MetricCacheRequest(
-            analysis_source_path=analysis_source_path,
-            metric_frame_range=metric_frame_range,
-            effective_fps=effective_fps,
-            metric_active_rect=active_rect.rect,
-            active_rect_source=active_rect.source,
-            active_rect_detection_mode=active_rect.detection_mode,
-            active_rect_algorithm_id=active_rect.algorithm_id,
-        ),
+        list(video_paths), config, selection_domain=selection_domain, metric_request=request
     )
     delete_metrics_cache_entry(cache_dir, key)
 
@@ -980,22 +1036,8 @@ def _git_provenance(root: Path) -> JsonObject:
 
 
 def _git_output(root: Path, args: Sequence[str]) -> str | None:
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(root), *args],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=10,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    return result.stdout.strip() if result.returncode == 0 else None
-
-
-def _resolve_config_path(root: Path, configured_path: str) -> Path:
-    path = Path(configured_path)
-    return path if path.is_absolute() else root / path
+    output = _small_text_command(["git", "-C", str(root), *args], _GIT_STDOUT_BYTES)
+    return None if output is None else output.strip()
 
 
 def _runtime_facts() -> JsonObject:
@@ -1020,40 +1062,38 @@ def _runtime_facts() -> JsonObject:
 
 
 def _command_version(command: str) -> str | None:
+    output = _small_text_command([command, "-version"], _VERSION_STDOUT_BYTES)
+    return output.splitlines()[0].rstrip() if output else None
+
+
+def _small_text_command(argv: Sequence[str], stdout_limit: int) -> str | None:
     try:
-        result = subprocess.run(
-            [command, "-version"], capture_output=True, text=True, check=False, timeout=10
+        result = run_subprocess(
+            argv,
+            timeout_seconds=10,
+            check=False,
+            max_stdout_bytes=stdout_limit,
+            max_stderr_bytes=_TEXT_STDERR_BYTES,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except (OSError, subprocess.TimeoutExpired, SubprocessOutputLimitExceeded):
         return None
-    return result.stdout.splitlines()[0] if result.returncode == 0 and result.stdout else None
+    if result.returncode != 0:
+        return None
+    output = sanitize_diagnostic(result.stdout, diagnostic_secrets())
+    return output.decode() if len(output) <= stdout_limit else None
 
 
-def _source_index_facts(paths: Sequence[Path]) -> dict[str, JsonObject]:
+def _source_index_facts(
+    paths: Sequence[Path], index_cache: ManagedSourceIndexCache
+) -> dict[str, JsonObject]:
     facts: dict[str, JsonObject] = {}
     for path in paths:
-        owned_index = source_index_path(path)
-        legacy_candidates = list(
-            dict.fromkeys(
-                (
-                    Path(f"{path}.lwi"),
-                    path.with_suffix(".lwi"),
-                    path.with_suffix(f"{path.suffix}.lwi"),
-                )
-            )
-        )
-        legacy_existing = [
-            candidate
-            for candidate in legacy_candidates
-            if candidate != owned_index and candidate.is_file()
-        ]
-        owned_exists = owned_index.is_file()
+        index = index_cache.validated_index(path)
         facts[path.as_posix()] = {
-            "detected": owned_exists,
-            "expected_path": owned_index.as_posix(),
-            "paths": [owned_index.as_posix()] if owned_exists else [],
-            "sizes_bytes": [owned_index.stat().st_size] if owned_exists else [],
-            "legacy_paths_ignored": [candidate.as_posix() for candidate in legacy_existing],
+            "detected": index is not None,
+            "expected_path": index.as_posix() if index is not None else None,
+            "paths": [index.as_posix()] if index is not None else [],
+            "sizes_bytes": [index.stat().st_size] if index is not None else [],
         }
     return facts
 
@@ -1089,8 +1129,8 @@ def _probe_source_facts(
             source_fps=source_fps,
         )
         started = time.perf_counter()
-        result["frame_types"] = _frame_type_summary(
-            _run_ffprobe_json(options, path=path, timeout_seconds=timeout_seconds)
+        result["frame_types"] = _run_ffprobe_frame_scan(
+            options, path=path, timeout_seconds=timeout_seconds
         )
         result["frame_type_inspection_seconds"] = time.perf_counter() - started
         result["frame_type_inspection_scope"] = scope
@@ -1107,7 +1147,8 @@ def _frame_type_probe_options(
         interval = f"{float(start):.6f}%+{float(duration):.6f}"
         options.extend(["-read_intervals", interval])
         scope: JsonObject = {
-            "kind": "benchmark-window",
+            "kind": "approximate-benchmark-window",
+            "approximate": True,
             "start_frame": window_start,
             "end_frame_exclusive": window_end_exclusive,
             "source_fps": str(source_fps),
@@ -1120,29 +1161,37 @@ def _frame_type_probe_options(
             "requested_start_frame": window_start,
             "requested_end_frame_exclusive": window_end_exclusive,
         }
-    options.extend(["-show_frames", "-show_entries", "frame=key_frame,pict_type"])
+    options.extend(
+        [
+            "-show_frames",
+            "-show_entries",
+            "frame=key_frame,pict_type,best_effort_timestamp_time:frame_side_data=",
+        ]
+    )
     return options, scope
 
 
 def _run_ffprobe_json(options: Sequence[str], *, path: Path, timeout_seconds: float) -> JsonObject:
     try:
-        result = subprocess.run(
+        result = run_subprocess(
             ["ffprobe", "-v", "error", *options, "-of", "json", str(path)],
-            capture_output=True,
-            text=True,
             check=False,
-            timeout=timeout_seconds,
+            timeout_seconds=timeout_seconds,
+            max_stdout_bytes=_METADATA_STDOUT_BYTES,
+            max_stderr_bytes=_FFPROBE_STDERR_BYTES,
         )
-    except OSError as exc:
-        return {"success": False, "error": f"{type(exc).__name__}: {exc}"}
-    except subprocess.TimeoutExpired:
-        return {"success": False, "error": f"ffprobe timed out after {timeout_seconds}s"}
+    except (OSError, subprocess.TimeoutExpired, SubprocessOutputLimitExceeded) as exc:
+        return {"success": False, "error": _probe_error(exc, timeout_seconds)}
     if result.returncode != 0:
-        return {"success": False, "returncode": result.returncode, "error": result.stderr.strip()}
+        return {
+            "success": False,
+            "returncode": result.returncode,
+            "error": _probe_exit_error(result),
+        }
     try:
         payload: object = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        return {"success": False, "error": f"invalid ffprobe JSON: {exc}"}
+    except (ValueError, RecursionError):
+        return {"success": False, "error": "invalid ffprobe JSON"}
     return (
         {"success": True, "payload": payload}
         if isinstance(payload, dict)
@@ -1153,39 +1202,142 @@ def _run_ffprobe_json(options: Sequence[str], *, path: Path, timeout_seconds: fl
     )
 
 
-def _frame_type_summary(result: JsonObject) -> JsonObject:
-    if result.get("success") is not True:
-        return {"available": False, "error": result.get("error")}
-    payload = result.get("payload")
-    typed_payload = cast(Mapping[str, object], payload) if isinstance(payload, Mapping) else None
-    raw_frames = None if typed_payload is None else typed_payload.get("frames")
-    if not isinstance(raw_frames, list):
-        return {"available": False, "error": "ffprobe JSON did not contain frames"}
-    frames = cast(list[object], raw_frames)
-    counts: dict[str, int] = {}
-    keyframes: list[int] = []
-    for index, value in enumerate(frames):
-        if not isinstance(value, Mapping):
-            continue
-        frame = cast(Mapping[str, object], value)
-        pict_type = frame.get("pict_type")
-        if isinstance(pict_type, str):
-            counts[pict_type] = counts.get(pict_type, 0) + 1
-        if frame.get("key_frame") == 1:
-            keyframes.append(index)
-    gaps = [right - left for left, right in zip(keyframes, keyframes[1:], strict=False)]
+def _probe_error(
+    error: OSError | subprocess.TimeoutExpired | SubprocessOutputLimitExceeded,
+    timeout_seconds: float,
+) -> str:
+    if isinstance(error, subprocess.TimeoutExpired):
+        return f"ffprobe timed out after {timeout_seconds}s"
+    if isinstance(error, SubprocessOutputLimitExceeded):
+        return str(error)
+    detail = f"{type(error).__name__}: {error}"
+    return sanitize_diagnostic(detail.encode(errors="replace"), diagnostic_secrets()).decode()[
+        :1024
+    ]
+
+
+def _probe_exit_error(result: subprocess.CompletedProcess[bytes]) -> str:
+    return result.stderr.decode("utf-8", errors="replace").strip() or (
+        f"ffprobe exited with status {result.returncode}"
+    )
+
+
+class _FrameScanRejected(ValueError):
+    """The complete frame summary cannot be trusted."""
+
+
+@dataclass(slots=True)
+class _FrameScan:
+    pending: bytes = b""
+    frame_count: int = 0
+    keyframe_count: int = 0
+    previous_keyframe: int | None = None
+    types: Counter[str] = field(default_factory=Counter[str])
+    gaps: Counter[int] = field(default_factory=Counter[int])
+    observed_timestamps: list[float] = field(default_factory=list[float])
+
+    def feed(self, chunk: bytes) -> None:
+        rows = (self.pending + chunk).split(b"\n")
+        self.pending = rows.pop()
+        if len(self.pending) > _FRAME_ROW_MAX_BYTES:
+            raise _FrameScanRejected("malformed ffprobe frame row")
+        for row in rows:
+            match = _FRAME_ROW.fullmatch(row) if len(row) <= _FRAME_ROW_MAX_BYTES else None
+            if match is None:
+                raise _FrameScanRejected("malformed ffprobe frame row")
+            if self.frame_count >= _FRAME_SCAN_MAX_ROWS:
+                raise _FrameScanRejected(
+                    f"ffprobe frame scan exceeded {_FRAME_SCAN_MAX_ROWS:,} rows"
+                )
+            # FFprobe emits fields in its own order, independent of -show_entries.
+            key_frame, timestamp, pict_type = match.groups()
+            if timestamp != b"N/A":
+                self.observed_timestamps.append(float(timestamp))
+            self.types[pict_type.decode("ascii")] += 1
+            if key_frame == b"1":
+                if self.previous_keyframe is not None:
+                    self.gaps[self.frame_count - self.previous_keyframe] += 1
+                self.previous_keyframe = self.frame_count
+                self.keyframe_count += 1
+            self.frame_count += 1
+
+    def summary(self) -> JsonObject:
+        if self.pending:
+            raise _FrameScanRejected("incomplete ffprobe frame row")
+        return {
+            "available": True,
+            "frame_count": self.frame_count,
+            "type_counts": dict(self.types),
+            "keyframe_count": self.keyframe_count,
+            "keyframe_gap_frames": _gap_distribution(self.gaps),
+            "observed_timestamps_seconds": self.observed_timestamps,
+        }
+
+
+def _gap_distribution(gaps: Counter[int]) -> JsonObject:
+    # Keep one counter per distinct gap, not one entry per keyframe.
+    # Positive gaps sum to at most the frame cap, so there can be <1,415 keys.
+    if not gaps:
+        return {"count": 0}
+    ordered = sorted(gaps.items())
+    count = gaps.total()
+    total = sum(gap * frequency for gap, frequency in ordered)
+    squares = sum(gap * gap * frequency for gap, frequency in ordered)
+    lower_rank, upper_rank = (count - 1) // 2, count // 2
+    passed = 0
+    lower = upper = ordered[0][0]
+    for gap, frequency in ordered:
+        if passed <= lower_rank < passed + frequency:
+            lower = gap
+        passed += frequency
+        if passed > upper_rank:
+            upper = gap
+            break
     return {
-        "available": True,
-        "frame_count": len(frames),
-        "type_counts": counts,
-        "keyframe_count": len(keyframes),
-        "keyframe_gap_frames": _distribution([float(gap) for gap in gaps]),
+        "count": count,
+        "min": float(ordered[0][0]),
+        "max": float(ordered[-1][0]),
+        "mean": total / count,
+        "median": (lower + upper) / 2,
+        "pstdev": math.sqrt(count * squares - total * total) / count,
     }
 
 
-def _run_decode_baseline(*, analysis_source_path: Path) -> JsonObject:
+def _run_ffprobe_frame_scan(
+    options: Sequence[str], *, path: Path, timeout_seconds: float
+) -> JsonObject:
+    scan = _FrameScan()
+
+    def consume(chunk: bytes) -> None:
+        try:
+            scan.feed(chunk)
+        except _FrameScanRejected:
+            raise
+        except Exception:
+            raise _FrameScanRejected("ffprobe frame output consumer failed") from None
+
+    try:
+        result = run_subprocess(
+            ["ffprobe", "-v", "error", *options, "-of", "csv=p=0", str(path)],
+            check=False,
+            timeout_seconds=timeout_seconds,
+            stdout_consumer=consume,
+            max_stdout_bytes=_FRAME_SCAN_STDOUT_BYTES,
+            max_stderr_bytes=_FFPROBE_STDERR_BYTES,
+        )
+        # At error log level, even a zero exit can accompany a partial decode.
+        if result.returncode != 0 or result.stderr:
+            return {"available": False, "error": _probe_exit_error(result)}
+        return scan.summary()
+    except _FrameScanRejected as exc:
+        return {"available": False, "error": str(exc)}
+    except (OSError, subprocess.TimeoutExpired, SubprocessOutputLimitExceeded) as exc:
+        return {"available": False, "error": _probe_error(exc, timeout_seconds)}
+
+
+def _run_decode_baseline(*, analysis_source_path: Path, vs_loader: DefaultVSLoader) -> JsonObject:
     started = time.perf_counter()
-    source = DefaultVSLoader().load(analysis_source_path)
+    source = vs_loader.load(analysis_source_path)
     source_load_seconds = time.perf_counter() - started
     try:
         graph_started = time.perf_counter()
@@ -1207,9 +1359,9 @@ def _run_decode_baseline(*, analysis_source_path: Path) -> JsonObject:
     }
 
 
-def _resolve_benchmark_analysis_source_path(
-    *, input_dir: Path, input_paths: Sequence[Path], config: ConfigSchema
-) -> Path:
+def _resolve_benchmark_analysis_source(
+    *, cache_path: Path, input_dir: Path, input_paths: Sequence[Path], config: ConfigSchema
+) -> BenchmarkAnalysisSource:
     if config.sources.analysis_source == "fastest":
         raise SystemExit("Benchmarking requires an explicit analysis source, not 'fastest'.")
     if config.sources.match_fps != SourceMatchFpsMode.DISABLED:
@@ -1217,94 +1369,51 @@ def _resolve_benchmark_analysis_source_path(
     selection = resolve_source_selection(
         input_dir=input_dir, discovered_paths=list(input_paths), config=config.sources
     )
-    if config.sources.analysis_source == "reference":
-        return selection.ordered_paths[0]
-    return resolve_source_selector(
-        selector=config.sources.analysis_source,
-        input_dir=input_dir,
-        paths=selection.ordered_paths,
-        role="sources.analysis_source",
-    )
-
-
-def _resolve_benchmark_analysis_source(
-    *, root: Path, input_dir: Path, input_paths: Sequence[Path], config: ConfigSchema
-) -> BenchmarkAnalysisSource:
-    path = _resolve_benchmark_analysis_source_path(
-        input_dir=input_dir, input_paths=input_paths, config=config
-    )
-    selection = resolve_source_selection(
-        input_dir=input_dir, discovered_paths=list(input_paths), config=config.sources
-    )
-    override = selection.overrides_by_path.get(path)
-    prepared = _prepared_benchmark_clip(
-        root=root,
-        input_paths=selection.ordered_paths,
-        config=config,
-        source_path=path,
-        overrides_by_path=selection.overrides_by_path,
-    )
-    return BenchmarkAnalysisSource(
-        path=path,
-        ordered_paths=tuple(selection.ordered_paths),
-        effective_fps=None if override is None else override.effective_fps,
-        active_rect=_benchmark_active_rect_from_prepared_clip(
-            source_path=path, override=override, prepared_clip=prepared, config=config
-        ),
-        overrides_by_path=selection.overrides_by_path,
-        source_frame_count=None if prepared is None else prepared.probe.num_frames,
-        source_fps=None if prepared is None else prepared.probe.fps,
-    )
-
-
-def _prepared_benchmark_clip(
-    *,
-    root: Path,
-    input_paths: Sequence[Path],
-    config: ConfigSchema,
-    source_path: Path,
-    overrides_by_path: dict[Path, SourceOverrideConfig],
-) -> ClipState | None:
-    cache = _resolve_config_path(root, config.paths.generated_dir) / "clip_probe.toml"
-    entries = dict(load_clip_probe_cache(cache))
-    snapshots: dict[Path, ClipProbeSnapshot] = {}
-    for path in input_paths:
-        stat = path.stat()
-        key = compute_probe_cache_key(
-            ClipFingerprint(path=path, size_bytes=stat.st_size, mtime_ns=stat.st_mtime_ns)
+    path = (
+        selection.ordered_paths[0]
+        if config.sources.analysis_source == "reference"
+        else resolve_source_selector(
+            selector=config.sources.analysis_source,
+            input_dir=input_dir,
+            paths=selection.ordered_paths,
+            role="sources.analysis_source",
         )
-        snapshot = entries.get(key)
-        if snapshot is None:
-            return None
-        snapshots[path] = snapshot
+    )
+    snapshots = load_prepared_probe_snapshots(cache_path, selection.ordered_paths)
+    if snapshots is None:
+        raise SystemExit(
+            f"Prepared clip probe data is missing or stale in {cache_path}. "
+            "Run the normal preparation path first."
+        )
     result = build_selection_domain_clips_with_diagnostics(
-        ordered_paths=list(input_paths),
+        ordered_paths=selection.ordered_paths,
         snapshots_by_path=snapshots,
-        overrides_by_path=overrides_by_path,
-        labels_by_path={path: path.stem for path in input_paths},
+        overrides_by_path=selection.overrides_by_path,
+        labels_by_path={path: path.stem for path in selection.ordered_paths},
         match_fps=config.sources.match_fps,
         active_rect_detection=config.screenshots.active_rect_detection,
     )
-    return next(clip for clip in result.clips if clip.path == source_path)
+    prepared = next(clip for clip in result.clips if clip.path == path)
+    return BenchmarkAnalysisSource(
+        path=path,
+        ordered_paths=tuple(selection.ordered_paths),
+        effective_fps=prepared.effective_fps,
+        reference_fps=result.clips[0].effective_fps,
+        effective_frame_count=prepared.effective_num_frames(),
+        trim_start_frames=prepared.trim.trim_start_frames,
+        active_rect=_benchmark_active_rect_from_prepared_clip(prepared, config),
+        overrides_by_path=selection.overrides_by_path,
+        source_frame_count=prepared.probe.num_frames,
+        source_fps=prepared.probe.fps,
+    )
 
 
 def _benchmark_active_rect_from_prepared_clip(
-    *,
-    source_path: Path,
-    override: SourceOverrideConfig | None,
-    prepared_clip: ClipState | None,
-    config: ConfigSchema,
+    prepared_clip: ClipState, config: ConfigSchema
 ) -> BenchmarkActiveRect:
-    if override is not None and override.active_rect is not None:
-        rect = override.active_rect
-        return BenchmarkActiveRect(
-            rect=MetricActiveRect(rect.x, rect.y, rect.width, rect.height),
-            source="explicit",
-            detection_mode=config.screenshots.active_rect_detection.value,
-        )
-    if prepared_clip is None or prepared_clip.active_rect is None:
+    if prepared_clip.active_rect is None:
         raise SystemExit(
-            f"Prepared active-rectangle data for {source_path.name} is missing. "
+            f"Prepared active-rectangle data for {prepared_clip.path.name} is missing. "
             "Run the normal preparation path first."
         )
     prepared = prepared_clip.active_rect
@@ -1338,7 +1447,6 @@ def _require_selection_domain_for_analysis_cache_identity(
         bool(video_paths)
         and analysis_source.reference_path == video_paths[0]
         and analysis_source.path == video_paths[0]
-        and analysis_source.effective_fps is None
         and active_rect_detection == ScreenshotActiveRectDetection.ASPECT_RATIO
         and not any(
             _source_override_affects_selection_domain(value)

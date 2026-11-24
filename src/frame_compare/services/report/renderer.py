@@ -5,10 +5,10 @@ from __future__ import annotations
 import html
 import json
 from collections.abc import Mapping
-from datetime import datetime
 from typing import TYPE_CHECKING, Literal, cast
 from urllib.parse import urlparse
 
+from frame_compare.config.text_validation import show_bidi_formatting_controls
 from frame_compare.services.report.category_display import (
     humanize_category,
     label_repeats_category,
@@ -91,20 +91,27 @@ def _render_frame_options(
     )
 
 
-def _render_clip_options(clips: list[ReportClipPayload], *, selected_index: int | None) -> str:
-    if selected_index is None:
-        return "".join(
-            f'<option value="{_esc_attr(i)}" title="{_esc_attr(_clip_accessible_name(clip))}">'
-            f"{_esc_text(_clip_display(clip, 'control'))}</option>"
-            for i, clip in enumerate(clips)
-        )
+def _distinct_source_detail(detail: str, short_name: str) -> str:
+    separator = " · "
+    segments = detail.split(separator)
+    count = short_name.count(separator) + 1
+    if separator.join(segments[-count:]).casefold() == short_name.casefold():
+        return separator.join(segments[:-count])
+    return detail
+
+
+def _render_clip_options(clips: list[ReportClipPayload], *, selected_index: int) -> str:
     options: list[str] = []
     for i, clip in enumerate(clips):
         selected_attr = " selected" if i == selected_index else ""
+        short_name = _clip_display(clip, "micro")
+        detail = _clip_display(clip, "control")
+        detail = _distinct_source_detail(detail, short_name)
+        text = f"{short_name} · {detail}" if detail else short_name
+        accessible_name = _esc_attr(_clip_accessible_name(clip))
         options.append(
-            f'<option value="{_esc_attr(i)}"{selected_attr} '
-            f'title="{_esc_attr(_clip_accessible_name(clip))}">'
-            f"{_esc_text(_clip_display(clip, 'control'))}</option>"
+            f'<option value="{_esc_attr(i)}"{selected_attr} title="{accessible_name}" '
+            f'aria-label="{accessible_name}">{_esc_text(text)}</option>'
         )
     return "".join(options)
 
@@ -117,7 +124,7 @@ def _clip_display(
 
 def _clip_accessible_name(clip: ReportClipPayload) -> str:
     primary = _clip_display(clip, "primary")
-    filename = clip["display"]["filename"]
+    filename = show_bidi_formatting_controls(clip["display"]["filename"])
     return f"{primary} — {filename}" if filename else primary
 
 
@@ -267,19 +274,19 @@ def _render_tonemap_summary(rendering: object) -> str:
     """Render the concise archival tonemap summary from raw payload values."""
     rendering_map = _object_mapping(rendering)
     tonemap_map = _object_mapping(rendering_map.get("tonemap"))
-    if not tonemap_map.get("applied"):
+    if not tonemap_map.get("ran"):
         return "Not applied"
-    settings_map = _object_mapping(tonemap_map.get("settings"))
-    if not settings_map:
-        return "Applied"
-    preset = str(settings_map.get("preset", "")).replace("_", " ").title()
-    curve = _render_tone_curve(settings_map.get("tone_curve", ""))
-    target = settings_map.get("target_nits")
-    parts = [part for part in (preset, curve) if part]
-    summary = " · ".join(parts)
-    if target is not None and summary:
-        return f"{summary} · {target} nits"
-    return summary or "Applied"
+    shared = _object_mapping(tonemap_map.get("shared"))
+    if not shared:
+        return "Applied · varies by source"
+    algorithm = (
+        "fallback (peak-scaled)"
+        if shared.get("implementation") == "fallback"
+        else _render_tone_curve(shared.get("algorithm", ""))
+    )
+    controls = _object_mapping(shared.get("effective_controls"))
+    target = controls.get("target_nits")
+    return f"{algorithm} · {target} nits" if target is not None else algorithm
 
 
 _GAMUT_MAPPING_LABELS = {
@@ -310,18 +317,19 @@ def _render_tonemap_number(value: object) -> str:
     return str(value)
 
 
-def _render_tonemap_details(rendering: object) -> str:
-    """Render raw effective tonemap settings into an accessible details list."""
+def _render_tonemap_details(rendering: object, clips: object = ()) -> str:
+    """Render shared applied tonemap controls into an accessible details list."""
     rendering_map = _object_mapping(rendering)
     tonemap_map = _object_mapping(rendering_map.get("tonemap"))
-    settings_map = _object_mapping(tonemap_map.get("settings"))
-    if not settings_map:
-        return ""
+    shared = _object_mapping(tonemap_map.get("shared"))
+    settings_map = _object_mapping(shared.get("effective_controls"))
     labels = (
+        ("output_encoding", "Image encoding"),
+        ("frame_policy", "Frame processing"),
+        ("tonemap_speed", "Tonemap speed"),
         ("dynamic_peak_detection", "Dynamic peak detection"),
         ("contrast_recovery", "Contrast recovery"),
         ("gamma_lift", "Gamma lift"),
-        ("source_peak", "Source peak"),
         ("dst_min_nits", "Destination minimum"),
         ("knee_offset", "Knee offset"),
         ("smoothing_period", "Smoothing period"),
@@ -349,6 +357,20 @@ def _render_tonemap_details(rendering: object) -> str:
         value = settings_map.get(key)
         if value is None:
             value_text = "Automatic" if key == "source_peak" else None
+        elif key == "output_encoding" and value == "srgb":
+            value_text = "sRGB"
+        elif key == "frame_policy" and value in (
+            "sequence",
+            "independent_frames",
+            "shared_stateless",
+        ):
+            value_text = {
+                "sequence": "Sequence",
+                "independent_frames": "Independent frames",
+                "shared_stateless": "Shared (metadata peak, no per-frame measurement)",
+            }[value]
+        elif key == "tonemap_speed" and value in ("quality", "fast"):
+            value_text = "Quality" if value == "quality" else "Fast"
         elif key == "gamut_mapping" and isinstance(value, int) and not isinstance(value, bool):
             value_text = _GAMUT_MAPPING_LABELS.get(value, str(value))
         elif key == "metadata" and isinstance(value, int) and not isinstance(value, bool):
@@ -361,6 +383,28 @@ def _render_tonemap_details(rendering: object) -> str:
             value_text = str(value)
         if value_text is not None:
             rows.append(f"<div><dt>{_esc_text(label)}</dt><dd>{_esc_text(value_text)}</dd></div>")
+    default_peak_sources: list[str] = []
+    if isinstance(clips, list):
+        for clip in cast(list[object], clips):
+            clip_map = _object_mapping(clip)
+            presentation = _object_mapping(clip_map.get("presentation"))
+            applied = _object_mapping(presentation.get("tonemap"))
+            controls = _object_mapping(applied.get("effective_controls"))
+            if (
+                controls.get("tonemap_speed") == "fast"
+                and applied.get("source_peak_origin") == "default"
+            ):
+                label = clip_map.get("label")
+                default_peak_sources.append(str(label) if label else "a source")
+    if default_peak_sources:
+        rows.append(
+            "<div><dt>Source peak note</dt><dd>"
+            + _esc_text(
+                "Fast mode used the default 1000-nit source peak because no HDR peak "
+                "metadata was found."
+            )
+            + "</dd></div>"
+        )
     return "".join(rows)
 
 
@@ -392,7 +436,7 @@ def _render_info_modal(data: ReportPayload) -> str:
     shared_line_html = '<p class="rv-inspector-shared" data-info-clips-shared hidden></p>'
     rendering = data.get("rendering")
     tonemap_summary = _render_tonemap_summary(rendering)
-    advanced_rows = _render_tonemap_details(rendering)
+    advanced_rows = _render_tonemap_details(rendering, data.get("clips", []))
     advanced_details = (
         f"""<details class="rv-tonemap-details" data-rendering-details>
                         <summary>Advanced tonemap settings</summary>
@@ -440,57 +484,34 @@ def _render_info_modal(data: ReportPayload) -> str:
     </div>"""
 
 
-def _render_header(
-    title: str,
-    generated_at: str,
-    frame_count: int,
-    clip_count: int,
-    slowpics_link: str,
-) -> str:
-    try:
-        generated_date = datetime.fromisoformat(generated_at).date().isoformat()
-    except ValueError:
-        generated_date = generated_at
+def _render_bar_actions(slowpics_link: str) -> str:
     inspector_button = f'<button id="btn-inspector" class="rv-header-inspector-btn" type="button" aria-controls="rv-inspector" aria-expanded="false" aria-label="Open Inspector" title="Inspector (I)">{_render_icon("M3 3h14v14H3z M12 3v14")}<span>Inspector</span></button>'
     info_button = f'<button id="btn-info" class="rv-header-info-btn" aria-label="Report information" title="Report information">{_render_icon("M10 17a7 7 0 1 0 0-14 7 7 0 0 0 0 14 M10 9v4 M10 6.5v.1")}</button>'
     help_button = f'<button id="btn-help" class="rv-header-help-btn" aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">{_render_icon("M10 17a7 7 0 1 0 0-14 7 7 0 0 0 0 14 M8 7a2 2 0 0 1 4 0c0 2-2 2-2 4 M10 13.5v.1")}</button>'
-    slowpics_block = f"{slowpics_link} • " if slowpics_link else ""
-    try:
-        datetime.fromisoformat(generated_at)
-        generated_time = (
-            f'<time datetime="{_esc_attr(generated_at)}" '
-            f'title="{_esc_attr(generated_at)}">{_esc_text(generated_at)}</time>'
-        )
-    except ValueError:
-        generated_time = (
-            f'<span title="{_esc_attr(generated_at)}">{_esc_text(generated_date)}</span>'
-        )
-    return f"""        <header class="rv-header">
-            <div>
-                <div class="rv-title">{_esc_text(title)}</div>
-                <div class="rv-meta">Generated {generated_time} • {frame_count} frames • {clip_count} clips</div>
-            </div>
-            <div class="rv-header-right">
-                {slowpics_block}{inspector_button} {info_button} {help_button}
-            </div>
-        </header>"""
+    return f"""        <div class="rv-bar-actions">
+            {slowpics_link}{inspector_button} {info_button} {help_button}
+        </div>"""
 
 
 def _render_controls(
+    title: str,
+    slowpics_link: str,
     frame_options: str,
     left_clip_options: str,
     right_clip_options: str,
     active_clip_options: str,
 ) -> str:
     return f"""    <div class="rv-controls" role="toolbar" aria-label="Viewer controls">
-        <div class="rv-primary-controls" aria-label="Primary viewer controls">
-        <div class="rv-control-group rv-frame-controls">
-            <button id="btn-prev" aria-label="Previous frame">←</button>
-            <select id="frame-select" aria-label="Select frame">
-                {frame_options}
-            </select>
-            <button id="btn-next" aria-label="Next frame">→</button>
-            <span id="active-filter-badge" class="rv-active-filter-badge" hidden></span>
+        <div class="rv-title-stepper">
+            <div class="rv-title" title="{_esc_attr(title)}">{_esc_text(title)}</div>
+            <div class="rv-control-group rv-frame-controls">
+                <button id="btn-prev" aria-label="Previous frame">←</button>
+                <select id="frame-select" aria-label="Select frame">
+                    {frame_options}
+                </select>
+                <button id="btn-next" aria-label="Next frame">→</button>
+                <span id="active-filter-badge" class="rv-active-filter-badge" hidden></span>
+            </div>
         </div>
 
         <div class="rv-control-group rv-mode-controls" role="radiogroup" aria-label="View mode">
@@ -523,9 +544,9 @@ def _render_controls(
                 {active_clip_options}
             </select>
         </div>
-        <div id="alignment-status" class="rv-alignment-status" role="status" aria-live="polite" title="Spatial image offset for the selected pair"><span class="rv-offset-label">Offset:</span><span class="rv-offset-value"> none</span></div>
+        <div id="alignment-status" class="rv-alignment-status" role="status" aria-live="polite" title="Spatial image offset for the selected pair" hidden></div>
         </div>
-        </div>
+{_render_bar_actions(slowpics_link)}
     </div>"""
 
 
@@ -578,7 +599,7 @@ def _render_viewport_palette() -> str:
 
         <div class="rv-palette-group rv-palette-group--zoom">
             <button id="btn-zoom-out" aria-label="Zoom out" title="Zoom out (−)">{zoom_out_icon}</button>
-            <input type="range" id="zoom-range" min="0.25" max="4.0" step="0.1" value="1.0" aria-label="Zoom level" aria-valuemin="0.25" aria-valuemax="4.0" aria-valuenow="1.0">
+            <input type="range" id="zoom-range" min="0.05" max="4.0" step="0.01" value="1.0" aria-label="Zoom level" aria-valuemin="0.05" aria-valuemax="4.0" aria-valuenow="1.0">
             <button id="btn-zoom-in" aria-label="Zoom in" title="Zoom in (+)">{zoom_in_icon}</button>
             <button id="btn-zoom-reset" aria-label="Reset zoom" title="Reset viewport (R)">{_render_icon("M4 8a6 6 0 1 1 0 5 M4 3v5h5")}</button>
             <span id="zoom-val" class="rv-zoom-value">100%</span>
@@ -647,10 +668,10 @@ def _render_viewport_palette() -> str:
 
 
 def _render_stage() -> str:
-    return f"""    <div class="rv-viewer-stage rv-mode-slider" role="region" aria-label="Comparison viewer">
+    return f"""    <div class="rv-viewer-stage rv-mode-slider" tabindex="0" role="region" aria-label="Comparison viewer">
         <div class="rv-empty-state" data-empty-state hidden></div>
         <div class="rv-canvas" role="img" aria-label="Comparison image canvas">
-            <img src="data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=" alt="" class="rv-sizer" aria-hidden="true">
+            <img alt="" class="rv-sizer" aria-hidden="true">
             <div class="rv-layer rv-left">
                 <img src="" alt="" class="rv-image">
             </div>
@@ -658,10 +679,6 @@ def _render_stage() -> str:
                 <img src="" alt="" class="rv-image">
             </div>
             <div class="rv-divider"><div class="rv-divider-handle"></div></div>
-        </div>
-        <div class="rv-stage-labels">
-            <div id="label-left" class="rv-overlay-label"></div>
-            <div id="label-right" class="rv-overlay-label right"></div>
         </div>
         <span id="rv-lens-target" class="rv-lens-target" aria-hidden="true" hidden><i></i><i></i><i></i><i></i></span>
         <section id="rv-grid" class="rv-grid" aria-label="Grid comparison" hidden>
@@ -679,12 +696,20 @@ def _render_stage() -> str:
             <div class="rv-lens-caption" data-lens-caption-row hidden><span class="rv-lens-identity" data-lens-identity="active"></span><span class="rv-lens-identity" data-lens-identity="second" hidden aria-hidden="true"></span></div>
             <button class="rv-lens-grip" type="button" data-lens-drag-handle aria-label="Move lens window" title="Drag to move lens; use arrow keys when focused"><span aria-hidden="true">⠿</span></button>
         </aside>
-        <div class="rv-stage-overlay-info">
-            <span class="rv-info-label" data-current-frame-label></span>
-            <span class="rv-info-divider" data-current-frame-category-divider>•</span>
-            <span class="rv-info-category" data-current-frame-category></span>
-        </div>
+        <div class="rv-stage-chrome">
+            <div class="rv-stage-labels">
+                <div id="label-left" class="rv-overlay-label"></div>
+                <div id="label-right" class="rv-overlay-label right"></div>
+            </div>
+            <div class="rv-stage-bottom-controls">
+                <div class="rv-stage-overlay-info">
+                    <span class="rv-info-label" data-current-frame-label></span>
+                    <span class="rv-info-divider" data-current-frame-category-divider>•</span>
+                    <span class="rv-info-category" data-current-frame-category></span>
+                </div>
 {_render_viewport_palette()}
+            </div>
+        </div>
 {_render_lens_settings()}
     </div>"""
 
@@ -754,21 +779,6 @@ def _render_inspector() -> str:
                 <button type="button" data-review-import-trigger tabindex="-1">Import review JSON</button>
                 <input type="file" data-review-import accept=".json,application/json" hidden tabindex="-1">
             </div>
-            <div class="rv-review-preview" data-review-preview hidden>
-                <p data-review-preview-counts></p>
-                <fieldset><legend>Apply mode</legend>
-                    <label><input type="radio" name="review-import-mode" value="merge" checked> Merge</label>
-                    <label><input type="radio" name="review-import-mode" value="replace"> Replace</label>
-                </fieldset>
-                <fieldset><legend>Conflicts</legend>
-                    <label><input type="radio" name="review-import-conflict" value="keep-local" checked> Keep local</label>
-                    <label><input type="radio" name="review-import-conflict" value="use-imported"> Use imported</label>
-                </fieldset>
-                <div class="rv-inspector-actions">
-                    <button type="button" data-review-import-apply>Apply import</button>
-                    <button type="button" data-review-import-cancel>Cancel</button>
-                </div>
-            </div>
         </section>
     </aside>"""
 
@@ -826,8 +836,6 @@ def build_html(data: ReportPayload, include_filmstrip: bool = True) -> str:
     json_str = _json_for_script_tag(data)
 
     title = data["title"]
-    generated_at = data["generated_at"]
-    stats = data["stats"]
     slowpics_url = data["slowpics_url"]
     frames = data["frames"]
     clips = data["clips"]
@@ -863,14 +871,9 @@ def build_html(data: ReportPayload, include_filmstrip: bool = True) -> str:
         include_filmstrip=include_filmstrip,
     )
 
-    header_html = _render_header(
-        title=title,
-        generated_at=generated_at,
-        frame_count=stats["frame_count"],
-        clip_count=stats["clip_count"],
-        slowpics_link=slowpics_link,
-    )
     controls_html = _render_controls(
+        title,
+        slowpics_link,
         frame_options,
         left_clip_options,
         right_clip_options,
@@ -891,7 +894,6 @@ def build_html(data: ReportPayload, include_filmstrip: bool = True) -> str:
     <style>{get_css()}</style>
 </head>
 <body>
-{header_html}
 <div id="viewer-status" class="rv-status" role="status" aria-live="polite" hidden></div>
 <div id="viewer-live" class="rv-visually-hidden" role="status" aria-live="polite" aria-atomic="true"></div>
 {controls_html}

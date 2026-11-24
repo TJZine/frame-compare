@@ -45,9 +45,9 @@ dark_quantile = 0.20
 bright_quantile = 0.80
 ```
 
-Use it when comparing a new result with the retained Witch and Dan Da Dan
-evidence. Its wider 20%/80% category pools are deliberate research settings,
-not shipped defaults.
+Use it when comparing a new result with the retained 4K HDR film and 1080p
+animation evidence. Its wider 20%/80% category pools are deliberate research
+settings, not shipped defaults.
 
 ### Shipped-default quantile control
 
@@ -100,35 +100,46 @@ The benchmark JSON records the Git commit, dirty state, and porcelain status
 under `provenance`. Preserve the separate `git rev-parse HEAD` output as an
 independent check when a run will support a product decision.
 
+The tier benchmark refuses an output path that resolves to an input video or the
+selected config file. It also uses the prepared reference and analysis FPS and
+trim facts for cache identity and frame selection; keep those preparation facts
+stable across comparable runs.
+
+`--window-start` and `--window-end-exclusive` are offsets in the prepared
+analysis clip after source trims. The benchmark maps those offsets back to
+source-frame coordinates for the metric request, JSON `selection_window`, and
+selected frame numbers; those reported values remain source coordinates.
+
 ## Prepare the fixed corpus
 
-Use the same ordered reference/comparison pair for every rerun. The examples
-below match the retained evidence; change paths only when intentionally adding a
-new corpus.
+Use the same ordered reference/comparison pair for every rerun. The paths below
+stand for the retained corpus files that
+[Analysis Benchmark History](analysis-benchmark-history.md) describes. Change
+them only when intentionally adding a new corpus.
 
 ```powershell
-$WitchReference = (Resolve-Path -LiteralPath `
-  'comparison_videos\The Witch [2015] 2160p UHD BDRip DV HDR10 x265 DTS-HD MA 5.1-Kira.Clip.mkv').Path
-$WitchComparison = (Resolve-Path -LiteralPath `
-  'comparison_videos\The.VVitch.A.New-England.Folktale.2015.2160p.UHD.BluRay.DTS-HD.MA.5.1.DoVi.x265-CtrlHD.Clip.mkv').Path
+$FilmReference = (Resolve-Path -LiteralPath `
+  'comparison_videos\hdr-film-reference.mkv').Path
+$FilmComparison = (Resolve-Path -LiteralPath `
+  'comparison_videos\hdr-film-comparison.mkv').Path
 
 $AnimeReference = (Resolve-Path -LiteralPath `
-  'comparison_videos\DAN.DA.DAN.S02E01.Like.This.Is.the.Legend.of.the.Giant.Snake.1080p.BluRay.REMUX.AVC.FLAC.2.0-NAN0.mkv').Path
+  'comparison_videos\animation-reference.mkv').Path
 $AnimeComparison = (Resolve-Path -LiteralPath `
-  'comparison_videos\DAN.DA.DAN.S02E01.Like.This.Is.the.Legend.of.the.Giant.Snake.REPACK.1080p.CR.WEB-DL.DUAL.DDP2.0.H.264-Kitsune.mkv').Path
+  'comparison_videos\animation-comparison.mkv').Path
 ```
 
-Prepare probe data and warm Frame Compare-owned, runtime-versioned L-SMASH-Works
-`.lwi` source indexes through a normal application run before timing. The current
-filename suffix is `.frame-compare-lsw1310-f125953022b6.lwi`; an unrelated legacy
-adjacent `<media>.lwi` is intentionally not a warm-cache input. Point `--input` at a directory containing
-only the fixed case under test:
+Prepare probe data and warm the L-SMASH-Works indexes through a normal application
+run before timing. Use the same resolved source paths, generated root and runtime
+for the benchmark so it can reuse `cache/source-indexes/`; the managed Windows
+decoder token for this recipe is `lsw1310-47d07506e489`. Legacy adjacent indexes are
+inert. Point `--input` at a directory containing only the fixed case under test:
 
 ```powershell
 uv run --no-sync frame-compare run `
   --root . `
   --config config/benchmark.config.toml `
-  --input 'C:\Benchmarks\witch-case' `
+  --input 'C:\Benchmarks\hdr-film-case' `
   --no-upload
 ```
 
@@ -142,13 +153,13 @@ The retained decision window is source frames `240..2640`: 2,400 eligible
 frames with a nonzero start. Use three repetitions for routine comparison and
 five when a close result or high variance will decide a change.
 
-### 4K HDR Witch
+### 4K HDR film
 
 ```powershell
 uv run --no-sync python tools/benchmark_analysis_tiers.py `
   --root . `
   --config config/benchmark.config.toml `
-  --output generated/analysis-production-witch-4k-hdr.json `
+  --output generated/analysis-production-4k-hdr-film.json `
   --window-start 240 `
   --window-end-exclusive 2640 `
   --repetitions 3 `
@@ -156,16 +167,16 @@ uv run --no-sync python tools/benchmark_analysis_tiers.py `
   --require-warm-source-index `
   --inspect-frame-types `
   --ffprobe-timeout 300 `
-  $WitchReference $WitchComparison
+  $FilmReference $FilmComparison
 ```
 
-### Dan Da Dan animation
+### 1080p animation
 
 ```powershell
 uv run --no-sync python tools/benchmark_analysis_tiers.py `
   --root . `
   --config config/benchmark.config.toml `
-  --output generated/analysis-production-dandadan-s02e01-1080p.json `
+  --output generated/analysis-production-animation-1080p.json `
   --window-start 240 `
   --window-end-exclusive 2640 `
   --repetitions 3 `
@@ -178,25 +189,28 @@ uv run --no-sync python tools/benchmark_analysis_tiers.py `
 
 Cold runs are the primary algorithm-performance evidence. Confirm every quality
 and performance trial reports a cache miss and a successful cache write. Frame
-type inspection runs after timed trials and is diagnostic only. The benchmark
-fails closed if a cold trial does not observe both the miss and successful write.
+type inspection runs after timed trials and is diagnostic only. When FPS is
+available, its `read_interval` is a seek hint and the resulting frame-type scope
+is marked approximate; the report records the observed frame timestamps. The
+benchmark fails closed if a cold trial does not observe both the miss and
+successful cache write.
 
 ## Shipped-default quantile control
 
-Repeat at least the primary Witch case with the copied default-quantile config:
+Repeat at least the primary 4K HDR film case with the copied default-quantile config:
 
 ```powershell
 uv run --no-sync python tools/benchmark_analysis_tiers.py `
   --root . `
   --config config/benchmark-default-quantiles.config.toml `
-  --output generated/analysis-production-witch-default-quantiles.json `
+  --output generated/analysis-production-hdr-film-default-quantiles.json `
   --window-start 240 `
   --window-end-exclusive 2640 `
   --repetitions 3 `
   --metric-cache-policy cold `
   --require-warm-source-index `
   --skip-decode-baseline `
-  $WitchReference $WitchComparison
+  $FilmReference $FilmComparison
 ```
 
 Repeat on the second corpus when the result will support a release-wide claim.
@@ -211,14 +225,14 @@ Run reuse only after a matching cold run has populated both mode caches:
 uv run --no-sync python tools/benchmark_analysis_tiers.py `
   --root . `
   --config config/benchmark.config.toml `
-  --output generated/analysis-production-witch-reuse.json `
+  --output generated/analysis-production-hdr-film-reuse.json `
   --window-start 240 `
   --window-end-exclusive 2640 `
   --repetitions 3 `
   --metric-cache-policy reuse `
   --require-warm-source-index `
   --skip-decode-baseline `
-  $WitchReference $WitchComparison
+  $FilmReference $FilmComparison
 ```
 
 Every reuse trial must report a cache hit. This control measures cache loading
@@ -232,8 +246,8 @@ This PowerShell summary works with the production `quality` reference and
 
 ```powershell
 $Files = @(
-  'generated/analysis-production-witch-4k-hdr.json',
-  'generated/analysis-production-dandadan-s02e01-1080p.json'
+  'generated/analysis-production-4k-hdr-film.json',
+  'generated/analysis-production-animation-1080p.json'
 )
 
 $Files | ForEach-Object {

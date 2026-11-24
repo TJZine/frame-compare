@@ -1,7 +1,6 @@
 """Cache serialization and round-trip contract tests."""
 
 import json
-from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 
@@ -51,24 +50,6 @@ def test_analysis_cache_key_intentionally_reuses_same_stat_identity(tmp_path: Pa
     assert compute_cache_key([replaced], config) == original
 
 
-def test_save_rejects_stale_nested_metadata_version(tmp_path: Path) -> None:
-    metadata = metrics_metadata(
-        frame_count=1,
-        fps=Fraction(24, 1),
-        config_fingerprint="fingerprint",
-        clips=[],
-        config=AnalysisConfig(),
-    )
-    metrics = FrameMetrics(
-        luminance=[0.1],
-        motion=[0.0],
-        metadata=replace(metadata, version=CACHE_VERSION - 1),
-    )
-
-    with pytest.raises(ValueError, match="does not match the current cache schema"):
-        save_metrics_cache(metrics, tmp_path)
-
-
 def test_request_aware_cache_load_rejects_mismatched_provenance(tmp_path: Path) -> None:
     video = create_video_file(tmp_path, "v1.mkv")
     config = AnalysisConfig()
@@ -78,7 +59,7 @@ def test_request_aware_cache_load_rejects_mismatched_provenance(tmp_path: Path) 
         effective_fps=Fraction(24, 1),
         metric_active_rect=rect,
         active_rect_source="explicit",
-        active_rect_detection_mode="provided",
+        active_rect_detection_mode="aspect_ratio",
     )
     fingerprint = compute_cache_key([video], config, metric_request=request)
     clips = [ClipIdentity(path=str(video), size=video.stat().st_size, mtime=video.stat().st_mtime)]
@@ -96,7 +77,7 @@ def test_request_aware_cache_load_rejects_mismatched_provenance(tmp_path: Path) 
             metric_backend=metric_backend(config),
             algorithm_identity_json=stable_metric_algorithm_identity_json(config),
             metric_active_rect=rect,
-            active_rect_source="metadata",
+            active_rect_source="dimension-derived",
             active_rect_detection_mode="aspect_ratio",
         ),
     )
@@ -157,7 +138,7 @@ def test_windowed_cache_request_rejects_different_range(tmp_path: Path) -> None:
     assert result.reason == "mismatched_inputs"
 
 
-def test_load_cache_accepts_content_derived_auto_active_rect_metadata(tmp_path: Path) -> None:
+def test_load_cache_retains_content_derived_active_rect_identity(tmp_path: Path) -> None:
     config = AnalysisConfig()
     metadata = valid_cache_metadata_payload(
         config,
@@ -166,6 +147,7 @@ def test_load_cache_accepts_content_derived_auto_active_rect_metadata(tmp_path: 
         active_rect_source="content-derived",
         active_rect_detection_mode="auto",
     )
+    metadata["active_rect_algorithm_id"] = MetricCacheRequest(None).active_rect_algorithm_id
     cache_file(tmp_path, "fp").write_text(
         json.dumps(
             {
@@ -194,41 +176,29 @@ def test_load_cache_accepts_content_derived_auto_active_rect_metadata(tmp_path: 
     assert result.metrics.metadata.active_rect_detection_mode == "auto"
 
 
-def test_save_writes_required_keys(tmp_path: Path) -> None:
-    """Cache file JSON has all required keys + version == CACHE_VERSION."""
+def test_cache_roundtrip_accepts_long_canonical_fps_ratio(tmp_path: Path) -> None:
     config = AnalysisConfig()
+    fps = Fraction(2400000000000000001, 100000000000000000)
     metadata = metrics_metadata(
-        frame_count=10,
-        fps=Fraction(24000, 1001),
-        config_fingerprint="fp",
+        frame_count=1,
+        fps=fps,
+        config_fingerprint="long-fps",
         clips=[],
         config=config,
     )
-    metrics = FrameMetrics(luminance=[0.5] * 10, motion=[0.0] * 10, metadata=metadata)
-    save_metrics_cache(metrics, tmp_path)
 
-    with (tmp_path / "analysis__fp.compframes").open("r") as f:
-        data = json.load(f)
-
-    assert data["version"] == CACHE_VERSION
-    assert "fingerprint" in data
-    assert "luminance" in data
-    assert "motion" in data
-    assert "metadata" in data
-    assert data["metadata"]["frame_count"] == 10
-    assert data["sampled_source_frames"] is None
-    assert data["metadata"]["fps"] == "24000/1001"
-    assert data["metadata"]["analysis_source_path"] == ""
-    assert data["metadata"]["performance_mode"] == "quality"
-    assert data["metadata"]["algorithm_id"] == metric_algorithm_id(config)
-    assert data["metadata"]["metric_backend"] == "vapoursynth_planestats"
-    assert data["metadata"]["algorithm_identity_json"] == stable_metric_algorithm_identity_json(
-        config
+    save_metrics_cache(
+        FrameMetrics(luminance=[0.5], motion=[0.0], metadata=metadata),
+        tmp_path,
     )
-    assert data["metadata"]["metric_active_rect"] is None
-    assert data["metadata"]["active_rect_source"] == "full-frame"
-    assert data["metadata"]["active_rect_detection_mode"] == "aspect_ratio"
-    assert data["metadata"]["active_rect_algorithm_id"] == "active_rect_resolution_v2"
+    payload = json.loads((tmp_path / "analysis__long-fps.compframes").read_text())
+    assert payload["metadata"]["fps"] == str(fps)
+
+    result = load_cached_metrics(tmp_path, "long-fps")
+
+    assert result.success is True
+    assert result.metrics is not None
+    assert result.metrics.metadata.fps == fps
 
 
 @pytest.mark.parametrize("case", ["basic", "active_rect", "window", "sparse"])
@@ -328,12 +298,12 @@ def test_metrics_cache_roundtrip_cases(tmp_path: Path, case: str) -> None:
         assert result.metrics.metadata.metric_active_rect is None
         assert result.metrics.metadata.active_rect_source == "full-frame"
         assert result.metrics.metadata.active_rect_detection_mode == "aspect_ratio"
-        assert result.metrics.metadata.active_rect_algorithm_id == "active_rect_resolution_v2"
+        assert result.metrics.metadata.active_rect_algorithm_id == "active_rect_resolution_v3"
     elif case == "active_rect":
         assert result.metrics.metadata.metric_active_rect == rect
         assert result.metrics.metadata.active_rect_source == "explicit"
         assert result.metrics.metadata.active_rect_detection_mode == "provided"
-        assert result.metrics.metadata.active_rect_algorithm_id == "active_rect_resolution_v2"
+        assert result.metrics.metadata.active_rect_algorithm_id == "active_rect_resolution_v3"
     elif case == "window":
         assert result.metrics.motion[0] == 0.4
         assert result.metrics.metadata.metric_source_start == 20

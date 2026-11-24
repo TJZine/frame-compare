@@ -10,10 +10,8 @@ import typer
 
 from frame_compare.config.schema import ConfigSchema
 from frame_compare.errors import FrameCompareError
-from frame_compare.orchestration.preflight import (
-    resolve_selected_config_path,
-    validate_and_normalize_config_paths,
-)
+from frame_compare.orchestration.preflight import validate_and_normalize_config_paths
+from frame_compare.orchestration.run_inputs import select_run_config_path
 from frame_compare.utils.terminal_theme import glyphs_for_stream
 
 from .cli_helpers import HandleErrorFn, LoadConfigFn, WriteConfigFn
@@ -42,13 +40,15 @@ class SavePresetFn(Protocol):
 
 
 def handle_preset_list(
-    resolved_root: Path,
+    root: Path,
+    config_path: Path | None,
     *,
     list_presets: ListPresetsFn,
     handle_error: HandleErrorFn,
     no_color: bool,
 ) -> None:
     try:
+        resolved_root, _ = select_run_config_path(config_path, root)
         presets_dir = resolved_root / "config" / "presets"
         for name in list_presets(presets_dir=presets_dir):
             typer.echo(name)
@@ -65,8 +65,8 @@ def handle_preset_list(
 
 def handle_preset_apply(
     name: str,
-    resolved_root: Path,
-    config_path: Path,
+    root: Path,
+    config_path: Path | None,
     *,
     load_config: LoadConfigFn,
     apply_preset: ApplyPresetFn,
@@ -75,15 +75,15 @@ def handle_preset_apply(
     no_color: bool,
 ) -> None:
     try:
+        resolved_root, selected = select_run_config_path(config_path, root)
         presets_dir = resolved_root / "config" / "presets"
-        resolve_selected_config_path(config_path, resolved_root)
-        config_data = load_config(config_path)
+        config_data = load_config(selected)
         validate_and_normalize_config_paths(config_data, resolved_root)
         updated = apply_preset(config_data, name, presets_dir=presets_dir)
         validate_and_normalize_config_paths(updated, resolved_root)
-        write_config_to(config_path, updated)
+        write_config_to(selected, updated)
         typer.echo(
-            f"{glyphs_for_stream(sys.stderr).ok} Applied preset '{name}' to {config_path}",
+            f"{glyphs_for_stream(sys.stderr).ok} Applied preset '{name}' to {selected}",
             err=True,
         )
     except FrameCompareError as error:
@@ -99,8 +99,8 @@ def handle_preset_apply(
 
 def handle_preset_save(
     name: str,
-    resolved_root: Path,
-    config_path: Path,
+    root: Path,
+    config_path: Path | None,
     *,
     load_config: LoadConfigFn,
     save_preset: SavePresetFn,
@@ -108,9 +108,9 @@ def handle_preset_save(
     no_color: bool,
 ) -> None:
     try:
+        resolved_root, selected = select_run_config_path(config_path, root)
         presets_dir = resolved_root / "config" / "presets"
-        resolve_selected_config_path(config_path, resolved_root)
-        config_data = load_config(config_path)
+        config_data = load_config(selected)
         validate_and_normalize_config_paths(config_data, resolved_root)
         saved_path = save_preset(name, config_data, presets_dir=presets_dir)
         typer.echo(

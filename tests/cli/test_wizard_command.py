@@ -118,9 +118,11 @@ def test_successful_write_prints_verified_next_steps_with_posix_quoting(
 
         lines = result.stderr.splitlines()
         doctor_line = next(line for line in lines if "frame-compare doctor" in line)
-        assert doctor_line.strip() == "1. Diagnose the runtime: frame-compare doctor"
         preview_line = next(line for line in lines if "Preview this configuration" in line)
         run_line = next(line for line in lines if line.strip().startswith("3. Run it:"))
+        assert doctor_line.strip() == "1. Diagnose the runtime: " + run_line.strip().removeprefix(
+            "3. Run it: "
+        ).replace("frame-compare run ", "frame-compare doctor ", 1)
 
         expected_root = root.resolve()
         expected_config = config_path.resolve()
@@ -890,3 +892,47 @@ def test_writer_serializes_raw_toml_once_and_maps_failure(
     safe_error = str(exc_info.value.context.to_dict())
     assert "sentinel serialization detail" not in safe_error
     assert "sentinel-secret" not in safe_error
+
+
+def test_wizard_writes_only_the_environment_selected_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
+        root, config_path = _workspace()
+        config_path.parent.mkdir()
+        literal = root / "$FC_TEST_CONFIG"
+        original = b'[paths]\ninput_dir = "comparison_videos"\ngenerated_dir = "generated"\n'
+        literal.write_bytes(original)
+        for value in (config_path.relative_to(root), config_path.resolve()):
+            config_path.write_bytes(original)
+            result = _invoke(
+                root,
+                "\nupdated-data\n\ny\n",
+                "--config",
+                literal.name,
+                env={"FC_TEST_CONFIG": str(value)},
+            )
+
+            assert result.exit_code == 0, result.stderr
+            assert f"Configuration written: {config_path.resolve()}" in result.stderr
+            assert (
+                tomllib.loads(config_path.read_text())["paths"]["generated_dir"] == "updated-data"
+            )
+            assert literal.read_bytes() == original
+
+
+def test_wizard_rejects_nul_input_path_without_writing_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with isolated_cli_filesystem(tmp_path, monkeypatch):
+        root, config_path = _workspace()
+        config_path.parent.mkdir()
+        original = b'[paths]\ninput_dir = "comparison_videos"\n'
+        config_path.write_bytes(original)
+
+        result = _invoke(root, "bad\x00dir\n")
+
+        assert result.exit_code == 2
+        assert "FC-1003" in result.stderr
+        assert "paths.input_dir" in result.stderr
+        assert config_path.read_bytes() == original

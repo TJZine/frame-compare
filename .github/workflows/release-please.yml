@@ -2,17 +2,17 @@ name: Release Please
 
 on:
   push:
-    branches: [main]
+    branches: [pre-release]
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-please-main
+  group: release-please-pre-release
   cancel-in-progress: false
 
 jobs:
-  initial_release_guard:
+  stable_release_guard:
     permissions:
       contents: read
     runs-on: ubuntu-24.04
@@ -20,59 +20,22 @@ jobs:
     outputs:
       enabled: ${{ steps.guard.outputs.enabled }}
     steps:
-      - name: Checkout manifest state
+      - name: Fetch live integration head and tags
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 1
+          ref: refs/heads/pre-release
+          fetch-depth: 0
           persist-credentials: false
 
-      - name: Require published stable manifest version
+      - name: Require the published stable version in integration history
         id: guard
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          printf 'enabled=false\n' >> "$GITHUB_OUTPUT"
-          manifest_version="$(
-            jq -er '.["."] | select(type == "string" and length > 0)' \
-              .release-please-manifest.json
-          )"
-          if [[ ! "$manifest_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-            echo "Release Please manifest contains an invalid stable version: $manifest_version" >&2
-            exit 1
-          fi
-          release_tag="v${manifest_version}"
-          if ! release_json="$(
-            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${release_tag}" 2>/dev/null
-          )"; then
-            echo "Release Please remains dormant until stable ${release_tag} is published."
-            exit 0
-          fi
-          draft="$(jq -r '.draft' <<<"$release_json")"
-          prerelease="$(jq -r '.prerelease' <<<"$release_json")"
-          tag_name="$(jq -r '.tag_name' <<<"$release_json")"
-          if [[
-            "$draft" != "false" ||
-            "$prerelease" != "false" ||
-            "$tag_name" != "$release_tag"
-          ]]; then
-            echo "Release Please remains dormant until ${release_tag} is a published stable release."
-            exit 0
-          fi
-          tag_sha="$(
-            gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${release_tag}" \
-              --jq '.object.sha'
-          )"
-          if [[ ! "$tag_sha" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "Published ${release_tag} does not resolve to a direct commit tag." >&2
-            exit 1
-          fi
-          printf 'enabled=true\n' >> "$GITHUB_OUTPUT"
+        run: python3 -B -m scripts.release_plan release-please-guard
 
   release_please:
-    needs: initial_release_guard
-    if: needs.initial_release_guard.outputs.enabled == 'true'
+    needs: stable_release_guard
+    if: needs.stable_release_guard.outputs.enabled == 'true'
     permissions:
       contents: write
       pull-requests: write
@@ -86,4 +49,5 @@ jobs:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+          target-branch: pre-release
           skip-github-release: true

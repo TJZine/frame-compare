@@ -1,16 +1,13 @@
-"""Tests for tonemapping module."""
-
 import asyncio
 from unittest.mock import MagicMock
 
 import pytest
-import vapoursynth as vs  # noqa: E402, I001
+import vapoursynth as vs
 
-import frame_compare.vs.tonemap_conversion as tonemap_module  # noqa: E402, I001
+import frame_compare.vs.tonemap_conversion as tonemap_module
 
 
 def test_to_rgbs_no_op_when_already_rgbs_real():
-    """Verify to_rgbs is no-op if format is already RGBS (real function)."""
     from frame_compare.vs.tonemap_conversion import to_rgbs
 
     mock_clip = MagicMock()
@@ -23,14 +20,11 @@ def test_to_rgbs_no_op_when_already_rgbs_real():
 
 
 def test_to_rgbs_converts_non_rgbs():
-    """Verify to_rgbs converts to RGBS when needed."""
     from frame_compare.vs.tonemap_conversion import to_rgbs
 
     mock_clip = MagicMock()
-    # Something different from mock_vs.RGBS (which is 0)
     mock_clip.format.id = 1
 
-    # Setup resize return
     mock_resized = MagicMock()
     mock_clip.resize.Bicubic.return_value = mock_resized
 

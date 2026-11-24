@@ -1,5 +1,8 @@
 function Test-ArgsContainConfigFlag([string[]]$ArgsValues) {
   foreach ($arg in $ArgsValues) {
+    if ($arg -eq "--") {
+      break
+    }
     if ($arg -eq "--config" -or $arg -eq "-c") {
       return $true
     }
@@ -39,7 +42,7 @@ function Get-ConfigInjectionIndex([string[]]$ArgsValues) {
   }
 
   $command = $ArgsValues[$commandIndex]
-  if ($command -eq "run" -or $command -eq "wizard") {
+  if ($command -eq "run" -or $command -eq "wizard" -or $command -eq "doctor") {
     return $commandIndex + 1
   }
   if ($command -eq "preset" -or $command -eq "history") {
@@ -207,7 +210,7 @@ function Invoke-FrameCompareShim([object[]]$ArgsValues) {
   }
   $locationPushed = $false
   try {
-    Push-Location $bundlePath
+    Push-Location -LiteralPath $bundlePath
     $locationPushed = $true
     $global:LASTEXITCODE = $null
     & $bundleLauncher @forwardArgs

@@ -35,7 +35,6 @@ preserve or explicitly change the corresponding product contracts and proof.
   licensing, and compatibility boundary.
 - `docs/DECISIONS.md`: historical rationale.
 - `CONTRIBUTING.md`: contributor setup and PR mechanics; `README.md`: user overview.
-- `docs/plans/**`: task memory activated under Planning And Handoff below.
 - Host configuration: tools, permissions, runtime capabilities, and model settings.
   It must not recreate the retired repository role/skill policy.
 
@@ -91,49 +90,28 @@ Default Docker posture:
   open a generated fixture through both source loaders; invoke `placebo.Tonemap`
   without reducing the result to 8-bit; run `doctor --json`; inspect native
   linkage for missing shared libraries; and execute as a non-root user.
-- Optional Docker GPU or GUI profiles require compatible host setup and separate
-  verification; do not treat them as covered by the default gate unless the task
-  explicitly adds and proves them.
 
 Windows portable local packaging path:
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/validate_update_public_key.ps1 -PublicKeyPath tools/windows_portable/update_public_key.xml
 pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/build_portable.ps1 -ManifestPath tools/windows_portable/manifest.windows-x64.json -OutDir dist/frame-compare-portable-win-x64 -CacheDir .portable_cache
 dist/frame-compare-portable-win-x64/frame-compare.ps1 doctor --json
 ```
 
-Windows code-only update packaging path:
-
-```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/build_update.ps1 -BundleDir .\dist\frame-compare-portable-win-x64 -OutFile .\dist\frame-compare-update-win-x64-<version>.zip
-pwsh -NoProfile -ExecutionPolicy Bypass -File tools/windows_portable/sign_update.ps1 -UpdateZip .\dist\frame-compare-update-win-x64-<version>.zip -ExpectedPublicKeyPath .\tools\windows_portable\update_public_key.xml
-```
-
 The Windows commands require a Windows host with PowerShell and the expected
-toolchain. In non-Windows environments, treat them as documented-only unless a
-compatible runner is available. `build_portable.ps1` packages application source
-and builds wheel metadata from committed `HEAD`, excluding uncommitted changes in
-`src/frame_compare` and `pyproject.toml`. Record the packaged SHA and relevant
-working-tree differences; a successful bundle check does not verify excluded edits.
-Other packaging inputs may come from the worktree, so a SHA alone does not describe
-a dirty local build. Use a candidate commit when authorized or record that candidate
-packaging proof remains outstanding; this recipe does not authorize a commit.
-A code-only update does not carry native media
-artifacts. `build_update.ps1` accepts only a native-panel-capable full bundle with
-`bundle_info.schema_version` 3, and copies the complete bundle's required
-media-runtime fingerprint into the signed update manifest. The installed updater
-refuses pre-native-panel schema-2 bundles, as well as missing, legacy, malformed,
-or different fingerprints, before any unsafe dependency override; each refusal
-requires a complete portable bundle reinstall. Crossing a media-runtime
-fingerprint also requires a complete portable bundle reinstall.
-
-Maintainer update builds refuse uncommitted changes under `src/frame_compare` or
-`pyproject.toml` and package committed `HEAD`, matching the complete portable bundle's
-source selection. They also require the supplied complete bundle's application version
-and complete packaged `app/src/frame_compare` tree to match that committed source before
-borrowing its compatibility fingerprints. Commit the intended release source and rebuild
-the complete bundle before creating the matching update artifact.
+toolchain. `build_portable.ps1` uses one commit for the application source,
+wheel metadata, dependency lock, default portable manifest, vendored
+notices, and source inventory. Use `-ExpectedCommitSha` to select it, or let
+the builder capture `HEAD` once. A custom `-ManifestPath` supplies its own
+manifest and adjacent notices. Local builds use live tooling, including the
+installer and shims. The inventory lists scripts from the selected commit and
+hashes the files actually shipped. Record the selected SHA and worktree
+differences for a local build of an older commit. Version 2 manifests remain
+available for local builds with matching application source, the original
+embedded Python files and wheel-provided Qt FFmpeg. Version 3 omits the optional Python SQLite binaries and Qt's FFmpeg
+plugin and DLLs. It selects Qt's native Windows media backend. Hosted builds
+require version 3. `-ReleaseBuild` also requires
+a clean worktree at the selected commit before reserving output.
 
 Locked dependency audit (PowerShell):
 
@@ -144,12 +122,23 @@ uv run --no-sync pip-audit --strict --require-hashes --disable-pip --progress-sp
 Remove-Item -LiteralPath $auditRequirements
 ```
 
-Run the audit on both Windows and Linux before a release. The PyPA advisory
-database exposed by PyPI is the authority. Any known advisory or dependency
-collection failure blocks the release. An exception must be explicit and
-time-bounded in the active release plan with the advisory ID, affected package,
-owner, rationale, expiry, and removal condition; do not add an unrecorded
-`--ignore-vuln`.
+The reusable source-security workflow runs the lock audit on both Windows and
+Linux against the explicit candidate SHA. On a PR, the caller supplies the PR head
+SHA, and on a push or CI dispatch it supplies the event SHA. The release caller
+uses its planned release SHA and requires the audit before the Windows build. Both audit
+jobs verify the checked-out commit before installing tools or reading inputs.
+The PyPA advisory database exposed by PyPI is the authority for this dependency
+check. Known advisories and dependency collection failures block the gate.
+The source audit has no advisory suppressions.
+
+`bash tools/check_python_security.sh` runs Ruff and Bandit over the application,
+maintained release scripts, and the selected runtime and diagnostic tools. It
+fails on missing targets, incomplete scans, and medium or high findings. Bandit
+excludes tests and fixtures. Triage subprocess findings at the call site. The
+reviewed low-severity cases in the release and runtime tools use argument
+vectors without shell evaluation for pinned tools, resolved executables, or the
+invoking interpreter. Retain the medium/high gate and use rule-specific
+annotations for any justified exception at that severity.
 
 ## Verification Policy
 
@@ -157,6 +146,12 @@ Use `verify-code` and `.agents/project.md` to identify the changed claims and se
 the relevant routes below. Keep proof tied to the actual source, inputs, dependency
 set, and environment. Reuse inspected results while those conditions remain valid;
 do not repeat a clean check solely because another workflow stage began.
+
+The repository-local `verify-frame-compare` skill under
+`.agents/skills/verify-frame-compare/` owns the application user-journey map and
+driving entrypoint. Use affected journeys alongside the relevant procedures below;
+it adds no universal gate. Its shared creation/maintenance procedures run on
+request. Native and physical Windows acceptance remain separate proof obligations.
 
 Full native runs use the measured local count of four workers with `--dist loadgroup`.
 Focused selections, including single-test runs, may stay serial; `addopts` does not
@@ -180,7 +175,7 @@ Use for most code changes that do not affect packaging, Docker, Windows portable
 - Run the touched tests or a focused `pytest` selection.
 - Run `pyright --warnings`.
 - Run `ruff check .` and `ruff format --check .`.
-- Run `bandit -c pyproject.toml -r src --severity-level medium`.
+- Run `bash tools/check_python_security.sh`.
 - Run `lint-imports` if imports or top-level module boundaries changed.
 
 ### Full Verification
@@ -199,7 +194,7 @@ Run:
 uv run --no-sync pyright --warnings
 uv run --no-sync ruff check .
 uv run --no-sync ruff format --check .
-uv run --no-sync bandit -c pyproject.toml -r src --severity-level medium
+bash tools/check_python_security.sh
 uv run --no-sync pytest -q -n4 --dist loadgroup
 uv run --no-sync lint-imports --config importlinter.ini
 ```
@@ -240,13 +235,14 @@ uv venv "$distribution_dir/venv" --python 3.13
 uv pip install --python "$distribution_dir/venv/bin/python" "$distribution_dir"/*.whl
 "$distribution_dir/venv/bin/frame-compare" version
 "$distribution_dir/venv/bin/frame-compare" --help
+"$distribution_dir/venv/bin/python" -c 'from frame_compare.services.report.viewer import get_css, get_js; assert get_css() and get_js()'
 ```
 
-The verifier requires exactly one wheel and sdist. Inspect the built artifacts and
-installed behavior affected by the task; the verifier and help/version smoke do not
-exercise every packaged feature. On Windows use the corresponding `Scripts`
+The verifier requires exactly one wheel and sdist, with the report viewer assets
+and `py.typed` present in both. CI also reads the report CSS and JavaScript from the
+freshly installed wheel. Inspect any other installed behavior affected by the task. On Windows use the corresponding `Scripts`
 executables or an observed matching-SHA CI package result. This route does not prove
-Windows portable layout, native plugins, updater behavior, or signing. Runtime
+Windows portable layout, native plugins, ZIP installation, or artifact scanning. Runtime
 dependency changes also need the matching dependency audit and deployment proof.
 
 ### Docker / Runtime Verification
@@ -279,18 +275,40 @@ VapourSynth and skip unavailable real integrations; inspect what actually ran.
 Canonical command for the default Docker media runtime:
 
 ```bash
+bash tools/verify_docker_context.sh
 bash tools/verify_docker_integration.sh
 ```
+
+The context probe uses disposable, harmless `.env` and private-key-style
+sentinels. It checks the real Docker ignore rules, then exports the exact
+`application-inputs` stage used by the runtime and compares its entire file
+list. The production image copies that stage and the explicit locked package
+metadata. The test service mounts the checkout for tests and verification tools.
+
+CI runs this gate on native AMD64 and ARM64 Linux runners and uploads a separate
+artifact for each architecture. The separate alignment resource benchmark runs on AMD64.
 
 The full default gate runs `tests/e2e/`, `tests/integration/` and `tests/vs/` with
 10 workers and `--dist loadgroup`, plus runtime and production-image proofs.
 It explicitly excludes `tests/integration/test_alignment_streaming_resources.py`.
 `tools/verify_docker_integration.sh` owns image builds, container invocation,
-cleanup, logs, and artifact handling. It invokes the repository-owned
-`tools/docker_runtime_smoke.py` from the image for native runtime, provenance,
-fixture, and application assertions. Edit that Python owner for runtime proof;
-its source is included in the Docker build context and workflow trigger paths.
+cleanup, logs, and artifact handling. It retains `pytest.xml` in each run's artifact
+directory. The gate requires a readable JUnit report with at least one test and
+zero skipped or xfailed tests. The verifier sets pytest's xfail default to strict,
+so an unexpected pass fails unless the test explicitly sets `xfail(strict=False)`.
+A Docker or log-writer failure fails the gate. The verifier invokes the repository-owned
+`tools/docker_runtime_smoke.py` from the test service's repository mount for
+native runtime, provenance, fixture, and application assertions. The tool remains
+in the workflow trigger paths.
 Lint and shell-routing tests support the canonical gate but do not replace it.
+
+The production-image proof must run with a read-only media mount and writable
+generated mount. Record first-run managed index creation and second-run
+`cache=0` reuse. Preserve hashes and modification times for both managed
+entries on reuse and legacy media-adjacent sentinels throughout the proof.
+Compare the media directory listing before and after. The corresponding native
+Windows observations belong to the
+[physical Windows validation](media-runtime-windows-validation.md#7-cache-and-index-isolation).
 
 For changes to whole-track memory bounds, maximum admitted lag, or streaming collector
 cleanup, run the existing resource proof separately after the canonical gate has
@@ -317,10 +335,19 @@ known-current images.
 The verifier exports `FRAME_COMPARE_TEST_MEDIA_CACHE=/workspace/generated/test-media-cache`
 (host `generated/test-media-cache`). Only u4 media is cached, under
 `<cache>/<generator>/<key>/`; E2E media is regenerated. The SHA-256 key includes the
-exact generator source and complete `ffmpeg -version` output, obtained with an
-explicit timeout. Generation publishes by same-filesystem rename and prunes only
-that generator's old keys. Tests consume temporary symlinks so source indexes stay
-outside the cache. Unset the variable to generate in temporary storage as before.
+exact `tests/integration/alignment_u4_media_recipes.py` source and complete
+`ffmpeg -version` output, obtained with an explicit timeout. Assertion-only and
+store-only edits retain cached media. Recipes generate on demand with their declared
+prerequisites; each file publishes atomically by temporary file + replace. The full
+verifier passes `FRAME_COMPARE_U4_MEDIA_FULL=1` to prepare all 40 files; focused
+`--pytest-path` runs remain demand-driven. Only that generator's obsolete keys and
+temporary files are pruned while a session-held `.verifier.lock` protects generation
+and use. The lock file is never pruned. Tests consume temporary symlinks so source
+indexes stay outside the cache. Unset the cache variable for lazy temporary generation.
+Worker preparation stats (key, created/reused recipes, per-recipe seconds) are JSON
+files under `FRAME_COMPARE_E2E_ARTIFACTS`; see
+`tests/integration/NOTES-u4-media-preparation.md`
+for measured cold/focused and full-matrix costs.
 Run the verifier one at a time from a checkout: overlapping pruning is unsupported.
 No CI cache was added; Docker CI retains `--no-cache` and cold regeneration receives
 no warm-cache speedup.
@@ -336,9 +363,12 @@ successful proof.
 `src/frame_compare/vsview/**` also owns an external plugin/process/UI boundary.
 Pure metadata/result validation uses focused Python proof and the applicable full
 gate. Changes to plugin discovery, launch/lifetime, Qt callbacks, or generated native
-sessions require compatible-host integration proof: use the Linux GUI verifier or
-Windows portable route for the platform changed. The default Docker gate does not
-cover VSView. Retain the offscreen/visible/physical-host distinctions below.
+sessions require integration proof on the affected platform. Follow the
+[native Linux installation](getting-started/native.md#install-with-uv) with
+`--extra vsview` or the [Windows portable procedure](#windows-portable-release-path-verification).
+Use the [alignment review guide](guides/vsview-review.md) for the visible desktop
+journey. Offscreen checks establish the Python, Qt, and plugin behavior they
+exercise. Native media proof requires the L-SMASH-Works decoder (`core.lsmas`).
 
 For a coordinated media-runtime change, the gate additionally owns immutable
 source/wheel hashes and byte sizes, native SONAME/symlink preservation,
@@ -350,68 +380,11 @@ explicit security, ABI, licensing, image-size, and multiarchitecture decision.
 
 Current capability contract:
 
-| Environment | Default posture |
+| Environment | Supported runtime |
 | --- | --- |
-| macOS Docker Desktop | Supported for backend rendering, reports, and software tonemap only; Docker-based VSView GUI launch is unsupported beyond those backend features, and native GPU acceleration/native Qt desktop forwarding are not supported |
-| Linux Docker, CPU/software Vulkan | Canonical default Docker path; headless, deterministic, and CI-safe |
-| Linux Docker with NVIDIA GPU | Optional `gpu-nvidia` override/profile plus dedicated GPU proof path; documented-only/unverified unless separately proved on a compatible Linux NVIDIA host |
-| Linux Docker with X11 GUI | Optional `gui-linux` override/profile; the verifier contract covers offscreen VSView/plugin/session/metadata/result proof. The R81 dependency refresh has Linux-container offscreen proof on macOS Docker Desktop; the Linux X11 host wrapper and visible launch remain unverified |
-| Native Windows portable | Separate first-class native runtime/release surface, not a Docker profile |
-
-When documenting or reviewing optional Docker GPU/profile work, cite the official
-Docker references in prose so the host/runtime assumptions stay explicit:
-[Docker Engine GPU access](https://docs.docker.com/engine/containers/gpu/),
-[Docker Desktop GPU support notes](https://docs.docker.com/desktop/features/gpu/),
-[Compose profiles](https://docs.docker.com/compose/how-tos/profiles/), and the
-[Compose `gpus` service attribute](https://docs.docker.com/reference/compose-file/services/#gpus).
-
-Optional NVIDIA GPU proof command:
-
-```bash
-bash tools/verify_docker_gpu.sh
-```
-
-That command is not part of the default Docker gate. It is a separate, fail-closed
-host-dependent proof for Linux NVIDIA systems only. If the local machine cannot run
-it, record GPU support as documented-only/unverified rather than supported.
-
-Optional Linux X11 GUI proof command:
-
-```bash
-bash tools/verify_docker_gui.sh
-```
-
-That command is not part of the default Docker gate. It is a separate,
-host-dependent proof for Linux X11 desktop systems only. The minimal X11 contract
-is explicit:
-
-- host `DISPLAY`
-- host `/tmp/.X11-unix` socket mount into the container
-- optional host `XAUTHORITY` cookie file mount when the X server requires it
-- container user/UID aligned to the host UID/GID for local-user X11 permissions
-
-Docs and scripts must not use `xhost +`. If temporary X11 permission widening is
-needed, use the narrower host-local form `xhost +si:localuser:<user>` and record
-the cleanup command `xhost -si:localuser:<user>`. Real UI launch remains manual
-only; the proof command should verify dependency availability and session-script
-generation without requiring a visible desktop launch.
-
-The verifier contract covers this offscreen path: the `gui-linux` image must discover
-and load the exact Frame Compare VSView panel entry point, construct the panel in its
-inert ordinary-session state, load a production-generated L-SMASH session with VSView
-0.12.1, register `Reference`, `Comparison 1`, and `Comparison 2`, render frame 0 for
-all three outputs, and round-trip/validate the sibling result sidecar. The R81
-dependency refresh ran the inside-container offscreen proof on macOS Docker Desktop;
-see the [Windows 10 handoff](https://github.com/TJZine/frame-compare/blob/eeaa0154bf5996c616b74ccf910d7cf1584e8297/docs/plans/2026-10-07-dependency-refresh-windows10-handoff.md)
-for its evidence and limits. The Linux X11 host wrapper remains unverified.
-The contract does not prove a visible X11 desktop
-launch, Qt ergonomics, native Windows behavior, or physical-Windows acceptance.
-
-If the local machine cannot run the GUI proof command, record GUI support as
-documented-only/unverified rather than supported.
-On macOS, an offscreen or synthetic-panel check proves only the Python/Qt/plugin
-contract; if `core.lsmas` is absent, it is not native L-SMASH media proof. Linux X11
-visible-GUI behavior remains unavailable/unverified until a compatible host runs it.
+| macOS Docker Desktop and Linux Docker | Headless rendering, reports, and software-Vulkan tonemapping |
+| Native Linux with `--extra vsview` | Desktop alignment review |
+| Native Windows portable | Native rendering, desktop alignment review, and the Windows release path |
 
 ### Alignment Accuracy Benchmark
 
@@ -419,8 +392,12 @@ visible-GUI behavior remains unavailable/unverified until a compatible host runs
 file through the production alignment path (result cache disabled, per-pair
 diagnostics) and classifies each pair as `correct_applied`, `wrong_applied`,
 `provisional`, `unavailable`, or `correctly_withheld` for pairs that must never
-apply. It prints a sanitized summary (pair ids and categories only) and writes
-the full per-pair JSON plus diagnostics to the output directory. Run it in the Docker test service:
+apply. Before measuring, it verifies that the prepared clip order resolves to the
+labelled reference/comparison paths. Aborted or operationally failed attempts are
+`unavailable`; completed no-signal and inconclusive negative controls remain
+`correctly_withheld`. It prints a sanitized summary (pair ids and categories only)
+and writes the full per-pair JSON plus diagnostics to the output directory. Run it
+in the Docker test service:
 
 ```bash
 mkdir -p /tmp/u5-real-media
@@ -453,290 +430,353 @@ reference's probed FPS, matching `sources.match_fps = "assume_reference"`.
 Required when changing:
 
 - `.github/workflows/release.yml`
-- `.github/workflows/release-on-merge.yml`
+- `.github/workflows/rc.yml`
 - `.github/workflows/release-please.yml`
 - `.github/workflows/windows-portable.yml`
-- `.github/workflows/windows-portable-build.yml`
+- `.github/actions/windows-portable-build/action.yml`
 - anything under `tools/windows_portable/**`
 - installer/update commands or release asset layout in docs
-- bundle/update manifests and signing flow
+- bundle manifests or scan policy
 
 Source builds and source install entrypoints require PowerShell 7 or newer before
-bootstrap, sync, or output changes. Published-bundle installation, launch, and
-updates retain Windows PowerShell 5.1 support; exercise BOM-less UTF-8 install
-state from a non-ASCII bundle path under that interpreter.
+bootstrap, Python 3.13 provisioning, or output changes. Published-bundle
+installation and launch retain Windows PowerShell 5.1 support; exercise
+BOM-less UTF-8 install state from a non-ASCII bundle path under that interpreter.
+Windows portable pytest fixtures clear inherited `PSModulePath` for each test so
+Python-launched PS5.1 and PS7 initialize their own compatible module paths. The
+fixture restores the parent process environment after each test.
+
+For source-install changes, run `tests/windows_portable` on Windows with PowerShell
+7. Verify the default path provisions Python 3.13 before the builder and that
+`-SkipPythonInstall` (plus the legacy `-SkipSync` alias) still requires an existing
+discoverable Python 3.13. Manually rerun source installation with populated
+config/media/generated sentinels using both default Move and `-UserData Leave`, and
+inject a manifest failure. Verify old runtime/code and the previous pointer survive failures, moved
+folders reverse on failed activation before and after pointer replacement, and the
+shim launches the new bundle after success. Old bundles must remain for manual
+removal. Source targets use a UTC timestamp; direct maintainer/CI builds retain the
+same final path to preserve the requirements-lock fingerprint. Static tests and
+non-Windows skips do not establish these filesystem observations.
+The installer re-reads a single pointer byte snapshot after the build under the
+exclusive `state/source-install.lock` handle. Source migration, bundle activation,
+and source rollback retain that handle; a direct current-bundle installer acquires
+it itself. Verify overlapping activation refuses before shim/pointer/data changes,
+then succeeds after the handle closes (the lock file intentionally remains).
+Also cover pointer changes at the build boundary, locked-pointer recovery diagnostics,
+byte-exact pointer and shim restoration, malformed drive/root-relative pointers,
+and junction aliases into previous user data, cache, or protected build roots.
+Reparse ancestry is refused rather than inferring physical containment from a
+lexical path. Cross-volume user-data renames still fail at the rename operation.
 
 Canonical verification path:
 
-1. Validate the update public key and manifest schemas.
+1. Validate the runtime manifest and captured source identity.
 2. Download every artifact with exact byte-size and SHA-256 verification.
-3. Build the portable bundle and validate its deterministic ZIP layout, native
+3. The builder refuses occupied or unsafe output paths. Remove disposable candidate
+   output explicitly before rebuilding; never remove a populated installed bundle.
+   Build twice at the same final path (removing only the disposable first build)
+   and compare `bundle_info.requirements_lock_sha256`; it must remain identical.
+   Build the portable bundle and validate its deterministic ZIP layout, native
    plugin manifests, license inventory, source provenance, and runtime fingerprint.
 4. Run the extracted bundle's `--help`, `version`, and `doctor --json` smoke checks;
-   verify R81/API R4.3, L-SMASH-Works 1310, vs-placebo 2.0.4, VSView 0.12.1,
-   PySide6 6.11.2, BestSource, vspackrgb, and the selected LGPL-only
+   verify R82/API R4.3, L-SMASH-Works 1310, vs-placebo 2.0.5, VSView 0.14.0,
+   PySide6 6.12.0, BestSource, vspackrgb, and the selected LGPL-only
    FFmpeg artifact. FFMS2 must remain absent from the Windows baseline. In one
    required bundled Python process, preload the managed VapourSynth runtime before
    importing PySide6 or VSView, then recheck the plugin environment, open the generated
-   media through L-SMASH, and invoke the application tonemap path. The build must fail
-   closed unless exactly one repository wheel and one `frame_compare-*.dist-info`
-   directory exist; it copies only that metadata directory into `app/site-packages`,
-   verifies the exact `frame-compare-alignment-review` entry point, and keeps executable
-   application code resolved from `app/src`. The bundled Python proof must discover
-   and load that entry point, construct the panel offscreen, round-trip the generated
+   media through L-SMASH, and invoke the application tonemap path.
+   `tools/windows_portable/portable_bundle.py` projects the exact commit's
+   `src/frame_compare` into `app/src` and generates one
+   `frame_compare-*.dist-info` directory in `app/site-packages` from the
+   committed `pyproject.toml` and `LICENSE`. It checks the version against the packaged
+   source and requires the exact `frame-compare-alignment-review` entry point.
+   The bundled Python proof must discover and load that entry point, construct
+   the panel offscreen, round-trip the generated
    metadata/result sidecar, and reject a malformed result. BestSource is VSView/UI-only
    and does not replace Frame Compare's generated-session source loader.
+   The Qt Multimedia proof must report `qt_multimedia_backend=windows` after
+   confirming that Qt loaded the bundled Windows plugin and queried audio outputs.
+   A hosted runner without a default output reports `audio_device=none`.
+   The extracted bundle and packed ZIP checks require the Qt FFmpeg plugin and
+   DLLs to be absent. The standalone BtbN FFmpeg executable is unchanged.
    The repository-owned `tools/windows_portable/runtime_smoke.py` supplies this
    bundled Python proof. The builder copies it to temporary `runtime-smoke.py`,
    runs every required phase with the bundled interpreter and environment, and
    removes it in the existing cleanup. Source provenance includes the Python file;
    lint, syntax, and source equivalence do not establish Windows bundle acceptance.
-   Run the direct vs-placebo frame proof after Qt when Vulkan is usable; an exact
-   `vulkan_runtime_unavailable` skip is permitted only on hosts without that runtime
-   and does not replace the separate physical-Windows GPU proof.
-5. Build the code-only update ZIP when updater logic changes and prove both a
-   matching-runtime apply/rollback and a mismatched media-runtime or requirements-
-   fingerprint fail-closed refusal. Every pre-native-panel schema-2 bundle must be
-   refused and fully reinstalled; a code-only update must not mix its old UI/native
-   dependency graph with the new application code, even when the media-runtime
-   fingerprint and L-SMASH index token are unchanged. The current full bundle
-   advertises `bundle_info.schema_version` 3.
-   Each update backup must record the bundle's media-runtime and requirements-lock
-   fingerprints. Verify that `list-backups` marks missing, malformed, or mismatched
-   backup identity as unavailable and that `rollback` refuses it before creating a
-   lock or changing files. Identity-less legacy backups are not migrated. A full
-   runtime reinstall uses a fresh, empty directory, preserves user configuration
-   and data, and never overlays a full ZIP onto an existing root.
-6. Sign the update ZIP when updater or release-package logic changes.
-7. Confirm the GitHub Actions Windows workflow still matches the documented local path.
-   For an exact hosted verification of a candidate SHA, dispatch the default-branch
-   workflow with its explicit verify inputs (the workflow checks out the supplied SHA):
+   Run the direct vs-placebo frame proof after Qt when Vulkan is usable. A
+   reported `vulkan_runtime_unavailable` means this capability remains unproved.
+   Before accepting a candidate with that hosted gap, the release maintainer
+   records a candidate-specific capability waiver and the separate successful
+   physical Windows GPU proof. See
+   [acceptance records](#release-acceptance-records).
+5. Pack the built tree with `tools/windows_portable/portable_bundle.py pack`.
+   Run `tests/windows_portable/test_windows_portable_zip_succession.py` with
+   `FRAME_COMPARE_TEST_PORTABLE_ZIP` set to the exact ZIP. Its archive checks
+   include the WebEngine and Qt FFmpeg exclusions. Require all eight cases and
+   zero skips, and record Windows PowerShell 5.1 and PowerShell 7 versions.
+   Keep the actual installed shim, user-data movement and reactivation, external
+   data, legacy leaf cleanup, and uninstall evidence. Upload the original raw ZIP
+   after the post-pack proof.
+6. Run the downstream [final-artifact scan](#final-artifact-security-evidence).
+   Confirm the immutable producer artifact ID, source commit and SHA-256.
+7. Complete [pre-merge physical Windows validation](media-runtime-windows-validation.md#1-exact-source-and-repository-gates)
+   for a coordinated runtime change. For promotion, use the
+   [published RC acceptance procedure](media-runtime-windows-validation.md#published-rc-acceptance).
+   Both routes require real runtime, HDR, and native-panel proof.
 
-   ```bash
-   WorkflowRef='<branch-containing-the-workflow>'
-   ExpectedSha='<40-character-lowercase-head-sha-of-WorkflowRef>'
-   gh workflow run windows-portable.yml \
-     --ref "$WorkflowRef" \
-     -f operation=verify \
-     -f channel=rc \
-     -f expected_sha="$ExpectedSha"
-   gh run list --workflow windows-portable.yml --limit 1
-   ```
+The Windows portable workflow (`.github/workflows/windows-portable.yml`) runs
+the Windows build and Linux scan on all pull requests. Release workflows call
+the same jobs with their planned SHA and `release_build: true`.
 
-   The secret-free validation job requires `ExpectedSha` to equal the selected
-   protected branch head or protected, conventionally named release-tag head before
-   the signed reusable workflow can start. The selected `release-candidate` or `production`
-   environment owns the signing key, required reviewer approval, and allowed
-   deployment branch/tag rules; `windows-ci` is the unsigned pull-request environment
-   and must not contain signing secrets. Record the resulting workflow URL, exact SHA,
-   success/failure result, and any uploaded portable/package proof. A hosted success
-   proves package/offscreen behavior;
-   complete physical Windows desktop acceptance remains a separate handoff.
+#### Portable runtime input authority
 
-   Before enabling this workflow, maintainers must finish the environment migration:
+Use the candidate's committed `uv.lock` and Windows runtime manifest with the
+workflow's pinned Windows host Python 3.13.17 and uv 0.13.8. Review changed archive pins,
+native provenance, Qt WebEngine exclusions and notices at the candidate commit.
+The assembler authenticates the exact Windows Python dependencies against the
+frozen lock and stages them in a local wheelhouse. It converts the authenticated
+`anitopy` 2.1.1 source archive into a deterministic wheel from an explicit
+allowlist of package files and metadata. Pinned uv installs the exact wheels
+offline by version and hash with index access, dependency resolution and builds
+disabled. Native archives use manifest size and SHA-256 pins. The assembled tree
+retains the approved Qt/PySide6 subset, native components, licenses and committed
+project metadata and entry points.
 
-   - create `windows-ci` without secrets or approval requirements;
-   - require reviewers and restrict deployment branches/tags on both
-     `release-candidate` and `production`;
-   - store `WINDOWS_UPDATE_SIGNING_KEY_XML` only as an environment secret in both
-     protected environments; and
-   - after confirming the protected copies and signed verification, remove the
-     same-named repository secret and any organization secret that grants this
-     repository access, then confirm `windows-ci` and an ordinary workflow cannot
-     resolve it. The one-time migration below retains the source until that proof.
+Use GitHub-hosted Windows to verify packaging and generated-fixture behavior. Complete
+[physical Windows acceptance on the published RC](media-runtime-windows-validation.md#published-rc-acceptance). Record real GPU Vulkan initialization, HDR10/Dolby Vision
+output, range and bit-depth preservation, real-media timing and frame properties,
+managed-index isolation and reuse, ZIP installation, and objective and perceptual
+comparison evidence.
 
-   GitHub resolves same-named environment secrets ahead of repository/organization
-   secrets rather than enforcing an environment-only namespace. The migration and
-   hosted negative-access proof are therefore release-blocking prerequisites.
-   Guarded RC and stable releases must also run from a protected branch;
-   the release workflow creates the validated release tag only after its preflight.
+#### Release acceptance records
 
-Current CI ownership:
+The maintainer records the candidate SHA, exact artifact digests, owner and result
+for each gate below before approving a public release. A skipped, missing or
+unreachable proof leaves the corresponding gate open.
 
-- Every signed caller explicitly passes `WINDOWS_UPDATE_SIGNING_KEY_XML` through
-  each reusable-workflow boundary. The final build job keeps its protected
-  environment and required approval. The existing repository key works during
-  migration; an environment key of the same name takes precedence when configured.
-  Unsigned PR calls pass no signing secret. Keep named forwarding at every boundary;
-  an environment binding alone does not supply an omitted secret in a reusable
-  workflow. Do not replace the explicit mapping with broad `secrets: inherit`.
-- `.github/workflows/release-on-merge.yml` observes pushes to `main`. A changed
-  stable manifest version starts publication only when GitHub identifies that exact
-  pushed commit as the merge commit of a release PR targeting this repository's
-  `main`. Supported titles are `chore(release): X.Y.Z` (Release Please),
-  `chore(release): prepare Frame Compare vX.Y.Z`, and
-  `chore(release)!: prepare Frame Compare vX.Y.Z`; the title version must match
-  the manifest. Ordinary merges, unchanged versions, and RC versions do not
-  publish. The version is compared with `main` before the push, supporting squash,
-  merge, and rebase merges even when the version bump precedes the final commit.
-  The release PR's final merged commit must be the pushed head.
-  Human merges trigger this workflow; merges performed using `GITHUB_TOKEN`
-  suppress downstream push workflows and require the manual entrypoint instead.
-  The workflow calls the same guarded release owner with the exact pushed SHA,
-  stable channel, and manifest version/tag. Production reviewer approval and
-  environment-scoped signing remain required. If `main` advances before publication,
-  the existing exact-SHA checks reject the release.
-- `.github/workflows/windows-portable.yml` is the existing default-branch
-  PR/manual entrypoint. Its `release` operation calls
-  `.github/workflows/release.yml` from the selected exact commit, which requires
-  channel/version/tag/SHA inputs, rechecks stable against current `main`, rejects
-  tag/release collisions, renders the matching validated `CHANGELOG.md` section as
-  the release body, and publishes only after complete draft asset and body proof.
-  Keeping dispatch at this pre-existing path makes the pre-merge RC reachable
-  without a preparatory commit on `main`.
-- `.github/workflows/release-please.yml` runs only after the version currently
-  recorded in `.release-please-manifest.json` has a matching published stable tag
-  and release. This keeps it dormant while the guarded release entrypoint is
-  publishing that manifest version, then resumes human-reviewed version/changelog
-  PR behavior for later changes. GitHub-release creation remains disabled; the
-  guarded release workflow owns publication through either automatic merge or
-  manual dispatch.
-- `.github/workflows/windows-portable-build.yml` is the reusable full portable
-  build/sign/verification boundary called by PR, manual verification, and the
-  release orchestrator.
-- `.github/workflows/windows-portable-build.yml` also builds and verifies a code-only
-  update zip after the full bundle exists. Pull requests prove unsigned update
-  zip creation and layout in the secret-free `windows-ci` environment. Reusable
-  release and manual runs obtain `WINDOWS_UPDATE_SIGNING_KEY_XML` from the selected
-  protected `release-candidate` or `production` environment only after its approval
-  and branch/tag rules pass; they fail before artifact publication when the secret is
-  absent, does not match the committed public key, or signing verification fails.
-  Every public Windows release includes the signed update zip and its checksum.
+- Verify the exact commit, raw Windows ZIP, scanner evidence and matching
+  `.zip.sha256`. Record the Windows smoke and both installer interpreters.
+- Retain physical Windows acceptance tied to the candidate bundle SHA-256.
+  If hosted direct Vulkan proof reports `vulkan_runtime_unavailable`, document
+  the exact capability, candidate SHA, observed reason, accountable release
+  maintainer, expiry in UTC, and a link to the successful substitute physical
+  proof. A waiver expires at the earlier of its stated date or any candidate
+  change. CI capability preflights otherwise fail closed. An unexplained skip
+  has no waiver.
+- Verify the shipped Qt/PySide6 subset, including the native Windows media
+  backend and the exclusions of WebEngine and Qt's FFmpeg plugin and DLLs.
+  Record the [native binary publication prerequisite](#native-binary-publication-prerequisite)
+  for the binaries in the release.
+- Retain the [final-artifact SBOM and advisory evidence](#final-artifact-security-evidence)
+  for each distributable runtime.
 
-GitHub-hosted Windows proves packaging and generated-fixture behavior, not a
-physical release workstation. A media-runtime refresh remains unmergeable until
-the separate physical-Windows handoff records real GPU Vulkan initialization,
-HDR10/Dolby Vision output, range/bit-depth preservation, real-media timing and
-frame properties, old/new index and cache behavior, updater migration from the
-previous bundle, and objective plus perceptual comparison evidence. Never describe
-that handoff as complete based only on hosted CI.
+#### Final-artifact security evidence
 
-### Pre-release, staging, and dependency-update flow
+The Windows workflow scans the raw portable ZIP from the build by immutable
+artifact ID and independently checks its producer SHA-256 before extraction.
+It retains Syft JSON, CycloneDX JSON, unsuppressed Grype JSON, database status,
+scanner versions, artifact binding and the policy receipt for 90 days. The
+release maintainer reviews native-component coverage and archives the evidence.
+A distributed Docker image requires equivalent external evidence tied to its
+immutable image digest. The locked Python source audit is a separate check.
 
-- `pre-release` is the current pre-main integration branch. Pull requests targeting
-  it receive the same path-applicable CI, documentation, and Docker checks as pull
-  requests targeting `main`; `cleanup` previously filled this role and is retired
-  from active workflow triggers.
-- `staging` is synchronized from `main` and is the integration target for normal
-  Dependabot version updates. It is not the pre-main release-integration branch.
+Use [Syft](https://oss.anchore.com/docs/guides/sbom/) for inventories and
+[Grype](https://oss.anchore.com/docs/guides/vulnerability/scan-targets/) for
+advisory matching. The candidate scanner pins for the Linux x64 scan are:
 
-- `.github/workflows/sync-staging.yml` runs after each `main` push and can also be
-  dispatched manually. It fast-forwards `staging` when possible, merges `main`
-  when the branches have diverged, and never force-pushes. A concurrent update or
-  merge conflict fails closed without changing the remote `staging` branch.
-- If a ruleset protects `staging`, it must allow this non-force update (or provide
-  an explicit bypass for the workflow actor); a required pull request or required
-  status check that blocks the bot will make the sync fail closed. Keep branch
-  deletion and force-push protections enabled.
-- Normal Dependabot version-update entries in `.github/dependabot.yml` target the
-  lowercase `staging` branch so dependency changes can be exercised before they
-  reach `main`. GitHub security-update PRs remain governed by GitHub's default
-  branch behavior and may still target `main`.
-- CI, documentation, Docker, Windows, and PR-title checks remain available for
-  `staging` pull requests. Because a `GITHUB_TOKEN` push does not start another
-  push-triggered workflow, run the relevant checks manually on `staging` after
-  validating an automatic sync and record the results in the PR or handoff.
-- Changes to `.github/workflows/sync-staging.yml` require the Full Verification
-  commands above plus this integration gate. Record evidence for the active
-  `staging` ruleset's behavior for the bot's non-force update, a merge-conflict
-  run failing with remote `staging` unchanged, a stale-`main` run refusing to
-  push with `staging` unchanged, and a `GITHUB_TOKEN` push producing no second
-  push-triggered workflow. If GitHub-only behavior cannot be exercised locally,
-  mark it documented-only and require maintainer confirmation; this section is
-  the authoritative record.
+| Verified release archive | SHA-256 |
+| --- | --- |
+| [Syft 1.57.1 Linux x64](https://github.com/anchore/syft/releases/tag/v1.57.1) | `bf52519eb57f675d47c07d43213cb6dff6449f3d6d1147ff6701ed91f44eef0c` |
+| [Grype 0.121.3 Linux x64](https://github.com/anchore/grype/releases/tag/v0.121.3) | `e9da18cc1429e786722e32161288103600efffd8e483c90761f90485bd1bec85` |
 
-Before merging a release PR, review the entire matching `CHANGELOG.md` version
-section and complete any missing user-facing changes, migration guidance, or
-known limitations. The guarded workflow publishes that full section, rather than
-generating a replacement summary from the merge commit. All version sources must
-agree as enforced by `scripts/validate_release_contract.py`.
+Verify archive hashes before extracting tools. For Windows, consume the original
+portable ZIP by immutable artifact ID and SHA-256. Use the portable
+archive safety policy for extraction into an empty isolated directory and
+inventory that tree with Syft's directory source. Never execute files from the
+bundle. For Docker, consume each distributable platform image by its immutable
+OCI digest. If only a local image exists, export it and bind both its exact image
+ID and the export SHA-256 to the evidence. Scan the runtime image's installed contents.
 
-The stable lifecycle is release-PR finalization, merging into
-`main`, then approval of the automatically requested production deployment. Manual
-publication remains available for an already-merged release or a merge that did
-not trigger automation (provided the tag/release does not already exist):
+Retain CycloneDX JSON and the native Syft JSON from a single inventory. Require
+nonempty inventories and check the scanner name and version in the Syft and
+Grype reports. Run Grype against the Syft JSON with a required update check, age
+and hash validation, and a valid database no older than five days. The gate
+requires the database source checksum and hashes a nonempty local database file
+up to 8 GiB. Retain the receipt with the tool versions, database identity, exact
+commit, artifact ID and digest, evidence hashes,
+counts and policy result. Reconcile coverage against the bundle
+inventory and native runtime pins for Windows, and against the native provenance
+records for Docker.
+Manually account for packages or files a scanner cannot identify, including
+embedded Python, Qt Multimedia, standalone FFmpeg, VapourSynth and native
+decoder/plugin libraries. Record the exact version or commit, license, source and
+advisory coverage for each missing native component using upstream advisories.
+An empty inventory, scanner error, invalid or stale database, or unresolved
+component coverage blocks acceptance.
+
+The automated gate refuses suppressions, high, critical or unknown severity
+(including unfixed findings), and any known exploited vulnerability (KEV)
+match. It applies those rules to primary and related vulnerabilities. Keep the
+unsuppressed machine-readable result and record lower-severity findings for
+review. A waiver for a finding eligible for manual acceptance must match the
+advisory ID, component identifier and version, target profile and artifact
+digest. Record the release maintainer and independent approver, rationale,
+compensating controls, UTC expiry and removal condition. The automated gate
+must pass independently of manual waivers.
+
+Keep scanner reports and policy receipts in CI for 90 days. Archive the
+SBOMs, scan receipts, native coverage notes and waiver decisions with the
+release evidence for the life of the supported release line. Record tool and
+database identifiers so later reassessments can distinguish changes in the
+artifact from changes in the advisory feed.
+
+### Pre-release and stable publication
+
+#### Native binary publication prerequisite
+
+Before any update to `pre-release` that can publish changed native binaries,
+verify native provenance and license coverage with the release maintainer and
+legal reviewer. Retain matching third-party notices, license texts and a
+distributor-controlled corresponding-source offer for the exact binaries to be
+distributed. Apply this prerequisite to both Windows and Docker before public
+distribution, and record the evidence for the candidate.
+
+#### Release candidate
+
+1. Before merging the active version branch (`vX.Y.Z`) into `pre-release`, complete
+   the [native binary publication prerequisite](#native-binary-publication-prerequisite)
+   when applicable. The maintainer then uses a merge commit and an identity that
+   triggers push workflows.
+   Merges made with `GITHUB_TOKEN` do not trigger the RC workflow.
+2. On the push, the RC workflow reads the live `pre-release` head. If its stable
+   version is already published, the run waits for the next version. Otherwise the
+   head must include `main` in its ancestry. Merge `main` through the integration
+   branch if that check fails. A complete RC for this commit already satisfies
+   publication. A published but incomplete RC requires manual repair.
+3. For a new candidate, the workflow chooses the next numeric `vX.Y.Z-rc.N` tag.
+   The source audit and Windows workflow use the planned commit SHA. The publisher
+   verifies the scanned ZIP by artifact ID and digest, creates a draft at that SHA,
+   and verifies the uploaded files before publishing it as a GitHub pre-release.
+4. Download `frame-compare-portable-win-x64-vX.Y.Z-rc.N.zip` and its matching
+   `.zip.sha256` file. Run `sha256sum --check <zip-name>.sha256` beside the ZIP.
+   The tag, ZIP name, and `bundle_inventory.json` field `bundle.commit_sha`
+   identify the candidate. Inside the ZIP, `frame-compare version` prints
+   `frame-compare X.Y.Z`.
+5. Review the [acceptance records](#release-acceptance-records) and test the
+   issued ZIP using [Published RC acceptance](media-runtime-windows-validation.md#published-rc-acceptance).
+   Pause merges into `pre-release` during acceptance. If its head advances,
+   accept the new candidate before promotion. If `main` advances, merge it
+   through the integration branch and test the resulting candidate.
+
+#### Stable promotion
+
+1. After accepting the RC, open a PR from `pre-release` to `main` and merge it
+   with a merge commit. Keep the accepted source tree intact.
+2. On the push, the stable workflow reads the live `main` head. Before a new
+   publication, it requires a complete published RC of the same version with
+   a tree identical to that head. If the tree differs, return to RC acceptance.
+3. The workflow audits the planned `main` commit, builds and scans its stable
+   ZIP, and publishes `vX.Y.Z` as a full release. Verify the two assets
+   (`frame-compare-portable-win-x64-vX.Y.Z.zip` and its `.zip.sha256`) and the
+   release notes. Both channels extract the matching `CHANGELOG.md` section.
+   The version must agree across the Release Please manifest, `pyproject.toml`,
+   package `__version__`, and editable entry in `uv.lock`.
+4. Check that the stable workflow moves the merged Release Please PR from
+   `autorelease: pending` to `autorelease: tagged`. An already tagged PR
+   satisfies this check.
+
+Use **Re-run all jobs** on the applicable push run after a failure. If the release
+definitions changed, rerun the push run for the current head. Only a full replan
+checks the live head, clears stale drafts for a new attempt, and recognizes a
+completed publication. Rerunning only failed jobs bypasses that recovery.
+A published release with missing or mismatched assets or a missing or incorrect
+tag target requires manual repair. A stable rerun that finds a complete release
+can still repair the Release Please label.
+
+#### Start the next release cycle
+
+1. Resolve the published stable tag via `refs/tags/vX.Y.Z` and start the next
+   version branch at its exact commit. Before merging the branch into
+   `pre-release`, apply the [native binary publication prerequisite](#native-binary-publication-prerequisite)
+   when applicable. Use a merge commit to bring the stable commit into
+   `pre-release` history before the next preparation cycle while preserving the
+   promotion's ancestry.
+2. Release Please observes pushes to `pre-release` and prepares version and
+   changelog PRs there. Its guard waits for a published stable release of the
+   manifest version and for the stable tag's commit to be in the branch history.
+   A missing release is treated as absent on HTTP 404. Other lookup errors fail
+   the run. The Release Please action leaves publication to the release workflows.
+3. Review the preparation PR for agreement across the manifest, `pyproject.toml`,
+   package `__version__`, and editable lock entry. Check for one matching
+   `## [X.Y.Z]` changelog section. Before merging, apply the
+   [native binary publication prerequisite](#native-binary-publication-prerequisite)
+   to any changed native binaries that the RC would publish, including changes
+   already on `pre-release`. Merge using an identity that triggers push workflows.
+   Verify the stable label after promotion.
+
+#### First 0.7.0 cutover checklist
+
+1. Squash the G5 PR into `v0.7.0` using `--match-head-commit` with the reviewed
+   PR head SHA. The integration branch has no required checks.
+2. Fetch `main` and confirm that `refs/remotes/origin/main` still points to
+   the reviewed `ba2d6c45` (`chore(release): 0.6.1`). If it has moved, review
+   the intervening changes before proceeding. With maintainer approval, merge
+   the reviewed SHA into `v0.7.0` using `git merge -s ours ba2d6c45`. Before
+   pushing, verify the old integration head and the reviewed `main` commit
+   are the first and second parents. Check that `HEAD^{tree}` equals
+   `HEAD^1^{tree}` and that `origin/main` is an ancestor. The integration tree
+   includes the prepared 0.6.1 changelog organization. Use qualified refs for
+   lookups and exact SHAs for checkouts and tag targets since `v0.7.0` names both
+   the integration branch and the planned stable tag.
+3. After the G5 PR reports the new checks, configure the repository before the
+   first integration merge.
+
+   - Enable merge commits and keep squash merges available for feature PRs.
+   - Remove linear-history requirements on `main` and `pre-release` so both
+     can accept merge commits. Keep both branches protected against direct
+     unauthorized writes, force pushes, and deletion. Keep `pre-release`
+     protected from automatic deletion after promotion.
+   - Replace required checks for the old unsigned verifier, signer, and
+     wrappers with `CI Pass` and the Windows portable jobs `build_test` and
+     `artifact_security` (displayed as **Inventory and scan portable ZIP**).
+     Use the contexts reported by the G5 PR. Leave path-filtered Docker and
+     docs jobs outside the universal required checks.
+   - Confirm the release workflows can create `v*` tags and that
+     `RELEASE_PLEASE_TOKEN` is configured.
+   - Create a fine-grained personal access token scoped to this repository only
+     with **Contents** and **Workflows** both set to **Read and write**. Save it
+     as the Actions repository secret `RELEASE_PUBLISH_TOKEN` before the first RC.
+     Record its expiration date when creating it. Before that date, create a
+     replacement with the same scope and permissions, update the secret, and
+     revoke the old token. The RC workflow uses this secret for GitHub release
+     creation and publication. Stable publication uses the workflow token.
+4. Complete the [native binary publication prerequisite](#native-binary-publication-prerequisite).
+   Check for existing `v0.7.0-rc.*` tags, then follow the [release candidate
+   procedure](#release-candidate) to merge `v0.7.0` into `pre-release`, verify the
+   issued ZIP and accept the RC. Expect `v0.7.0-rc.1` when there are no prior tags.
+   As part of acceptance, run the issued ZIP's `install.cmd` over an active v0.6.1
+   test installation and check comparisons, run history, and config after carry-over.
+5. Promote `pre-release` into `main` with a merge commit. Check that `v0.7.0`
+   is published with two assets and the 0.7.0 notes. The label job accepts
+   the absence of a Release Please PR for this manually prepared version.
+6. After promotion, Dependabot reads the default branch configuration that
+   targets `pre-release`. Retarget or close open PRs against `staging` and review
+   any staging-only commits before deleting that branch and its rules. Check
+   for other consumers before removing the old environment rules for
+   `release-candidate`, `production`, and `branch-maintenance`, the
+   `WINDOWS_UPDATE_SIGNING_KEY_XML` and `SIGNING_KEY_MIGRATION_TOKEN` secrets,
+   the `BRANCH_MAINTENANCE_CLIENT_ID` variable, the
+   `BRANCH_MAINTENANCE_PRIVATE_KEY` secret, and the branch-maintenance App
+   bypass. Keep historical release and archive tags.
+7. [Start the next release cycle](#start-the-next-release-cycle) from
+   `refs/tags/v0.7.0`. Check the first Release Please PR and its eventual stable label.
+
+Local workflow checks:
 
 ```bash
-ReleaseSha=$(gh api repos/TJZine/frame-compare/git/ref/heads/main --jq '.object.sha')
-gh workflow run windows-portable.yml --repo TJZine/frame-compare --ref main \
-  -f operation=release -f channel=stable -f version=X.Y.Z -f tag=vX.Y.Z \
-  -f expected_sha="$ReleaseSha"
+uv run --no-sync pytest -q tests/workflows/test_release_contract.py tests/workflows/test_github_workflows.py tests/windows_portable/test_windows_portable_workflow.py
 ```
-
-Replace `X.Y.Z` with the prepared version on `main`. Manual and automatic release
-jobs share a per-tag concurrency group; existing tag/release checks still reject
-duplicate publication. Keep `main` at the intended release commit while approving
-and running the build. The first stable release must be `0.1.0`.
-For initial stable preparation, do not use a Release Please-generated initial
-version-bump commit. Remove temporary `bootstrap-sha` and `release-as`
-only during final stable preparation after RC acceptance; the stable validator
-rejects them if they remain. Live RC/stable dispatches, production approval,
-remote tag/release cleanup, and the final merge are maintainer-only.
-
-When updater or release-package logic changes and the signed-update path cannot
-run locally or in CI with `WINDOWS_UPDATE_SIGNING_KEY_XML` (mapped from the protected
-environment secret in hosted CI), mark signing as
-documented-only in the task handoff and require explicit maintainer or
-Windows-runner confirmation before treating the signed update release path as
-fully verified.
-
-### One-time signing-key migration from the repository secret
-
-Use this only to transfer the existing key when its original private XML file is
-unavailable. It does not generate a key, rotate the committed public key, publish
-a release, or change environment protection rules. The migration runs on
-`v0.7.0` through the existing `windows-portable.yml` dispatcher, so its code need
-not be pushed to `main`. The reviewed branch must be available on GitHub before
-dispatch; the reusable migration workflow does not have a separate dispatch trigger.
-
-1. Create a short-lived fine-grained personal access token restricted to
-   `TJZine/frame-compare` with **Environments: read and write** (Metadata read is
-   implicit). Store it as `SIGNING_KEY_MIGRATION_TOKEN` under the **production
-   environment's secrets**, not as a repository secret or workflow input. Do not
-   reuse `RELEASE_PLEASE_TOKEN`. GitHub's normal workflow token cannot administer
-   environment secrets. See [environment-secret API permissions](https://docs.github.com/en/rest/actions/secrets#create-or-update-an-environment-secret).
-2. In production's deployment branch rules, temporarily add the exact branch
-   `v0.7.0` alongside `main`. Keep required reviewer approval enabled. Both
-   `production` and `release-candidate` must retain their required reviewers; the
-   migration checks both before it writes either secret.
-3. Review the exact branch head and dispatch it:
-
-   ```bash
-   MigrationSha=$(gh api repos/TJZine/frame-compare/git/ref/heads/v0.7.0 --jq '.object.sha')
-   gh workflow run windows-portable.yml --repo TJZine/frame-compare --ref v0.7.0 \
-     -f operation=migrate-signing-key -f expected_sha="$MigrationSha"
-   ```
-
-4. Approve the pending **production** deployment for that reviewed SHA. The
-   migration validates the existing private key against the committed public key
-   and checks its RSA private parameters before it writes. It passes the XML to
-   `gh secret set` on stdin; the CLI encrypts it before upload. The XML is never
-   put in command arguments, temporary files, artifacts, outputs, or logs. CLI
-   output and errors are captured and sanitized. See [GitHub CLI secret handling](https://cli.github.com/manual/gh_secret_set).
-5. Confirm the run reports both protected environment secrets configured. It
-   verifies secret metadata, not a readback of the value (GitHub does not provide
-   that). A partial failure leaves the repository source intact; repeating the
-   approved migration safely copies the same validated key to both destinations.
-6. Revoke the temporary token, delete `SIGNING_KEY_MIGRATION_TOKEN`, and remove
-   production's temporary `v0.7.0` deployment rule. This disables further migration
-   writes. Run signed verification using the corrected named-secret forwarding
-   on a protected, permitted branch; a successful signing run is the value proof.
-   Then remove the legacy repository signing secret and confirm ordinary jobs
-   cannot resolve it. Preserve a private backup through your own secure storage
-   if the original file is later recovered.
-
-The code on the current `main` revision omits named signing-secret forwarding;
-copying secrets alone does not repair that revision. A signed verification can
-exercise the corrected workflow on this branch after its protection and environment
-rules permit it. Stable publication still requires the corrected code on `main`
-and the exact-main release checks; this migration does not bypass that contract.
-
-Local proof for this migration is
-`uv run --no-sync pytest -q tests/workflows/test_signing_key_migration.py tests/workflows/test_github_workflows.py tests/workflows/test_release_on_merge.py`.
-It uses public, synthetic RSA parameters and simulated CLI/API responses. Hosted
-approval, environment-secret resolution, encryption/upload, and signed execution
-remain separate acceptance evidence. Remove the one-time migration operation,
-workflow, and script after the hosted migration and signing are accepted.
 
 ### Workflow And Documentation Verification
 
@@ -773,38 +813,9 @@ allowance; configuration presence is not proof that a capability is available.
 
 ## Planning And Handoff
 
-`design-code` owns planning method. The following repository-specific lifecycle
-keeps durable task memory out of user-documentation search. `docs/plans/` is
-inactive by default.
-
-It becomes authoritative only when all of these are true:
-
-1. The work needs a durable cross-session handoff, or the maintainer explicitly asks for a tracked plan file.
-2. A dated plan file is created or updated under `docs/plans/`.
-3. The plan has the required Zensical search-exclusion front matter followed by an
-   activation metadata block containing `Status: Active`.
-
-Required active-plan preamble:
-
-```text
----
-search:
-  exclude: true
----
-
-Status: Active
-Scope: <task scope>
-Owner: <person or session>
-```
-
-Rules:
-
-- If no active-plan marker exists, treat `docs/plans/` as reference-only.
-- Keep `search.exclude: true` on every tracked plan so internal planning material
-  cannot enter the user-documentation search index.
-- For single-session work, keep the plan inline unless a durable handoff is needed.
-- Only one active plan should exist per workstream.
-- When the work closes, change the marker to `Status: Historical` or move the document to historical/reference context in the same pass.
+`design-code` owns planning method. Keep task plans inline or in untracked
+local notes. The tracked docs tree holds no plan or review records; git
+history keeps the earlier ones.
 
 ## Documentation Freshness Triggers
 
@@ -814,9 +825,8 @@ Update `docs/current-cli-contract.md` when its documented product behavior chang
 
 Update `.agents/project.md` for changed local facts, common command routes, or
 test-policy decisions. Update this runbook for changed specialist procedures,
-verification requirements, plan-search metadata, or release authorization. Update
-the corresponding host or review-tool adapter when its discovery semantics change.
+verification requirements, or release authorization. Update the corresponding
+host or review-tool adapter when its discovery semantics change.
 Shared methodology belongs in the shared skills, not another repository copy.
 
-Correct stale active references in the same change. Historical plans remain history
-and do not require rewriting to resemble the current workflow.
+Correct stale active references in the same change.

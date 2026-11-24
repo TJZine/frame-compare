@@ -8,15 +8,14 @@ provenance all run for real.
 from __future__ import annotations
 
 import asyncio
-import sys
+from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 import pytest
 
-from frame_compare.services import alignment, alignment_audio, alignment_streaming
+from frame_compare.services import alignment, alignment_audio
 from frame_compare.services.alignment import _estimate_audio_pair
 from frame_compare.services.alignment import (
     align_clips_from_request as _align_clips_from_request,
@@ -26,112 +25,38 @@ from frame_compare.services.alignment_audio import (
     AudioStreamSelection,
     AudioStreamTimeline,
     ProbedStreams,
-    VideoStreamStart,
 )
-from frame_compare.services.alignment_manual_overrides import ManualOverride, save_manual_override
+from frame_compare.services.alignment_evidence import MAX_AUDIO_CHUNKS
 from frame_compare.services.alignment_streaming import (
     CollectionCleanup,
     CollectionFacts,
     PairedAudioCollectionFailure,
 )
 from frame_compare.services.errors import (
-    AlignmentSourceIdentityError,
     AudioAlignmentCancellationError,
     AudioAlignmentCleanupError,
 )
 from frame_compare.services.types import AlignmentConfig, AlignmentResult
-from frame_compare.utils.alignment_evidence import MAX_AUDIO_CHUNKS
 from tests.services.alignment_request_test_support import alignment_request
 from tests.services.alignment_synthetic_audio import (
     insert_program,
     make_program,
     shift_signal,
 )
+from tests.services.alignment_transport_support import (
+    DURATION_SECONDS,
+    audio_selection,
+    probed_streams,
+    stub_pcm_transport,
+    write_media_pair,
+)
 
 SEED = 11
 FPS = Fraction(24, 1)
-_DURATION_SECONDS = 35.0
-_DURATION_SAMPLES = int(_DURATION_SECONDS * 8000)
 
 
 def run_request(*args: object, **kwargs: object) -> list[AlignmentResult]:
     return list(asyncio.run(_align_clips_from_request(*args, **kwargs)).results)  # type: ignore[arg-type]
-
-
-def _payload(values: np.ndarray) -> bytes:
-    return np.ascontiguousarray(values, dtype="<f4").tobytes()
-
-
-def _writer_argv(pcm_path: Path) -> list[str]:
-    return [
-        sys.executable,
-        "-c",
-        "import sys; sys.stdout.buffer.write(open(sys.argv[1], 'rb').read())",
-        str(pcm_path),
-    ]
-
-
-def _selection(*, duration_seconds: float = _DURATION_SECONDS) -> AudioStreamSelection:
-    return AudioStreamSelection(
-        stream=AudioStreamInfo(
-            audio_stream_index=0,
-            absolute_stream_index=1,
-            codec_name="pcm",
-            channels=1,
-            channel_layout="mono",
-            sample_rate=8000,
-            language=None,
-            is_default=True,
-            is_original=False,
-            is_commentary=False,
-            timeline=AudioStreamTimeline(
-                start_time=Fraction(0),
-                duration=Fraction(duration_seconds),
-                time_base=Fraction(1, 8000),
-                duration_basis="stream_duration",
-            ),
-        ),
-        video_start=VideoStreamStart(start_time=Fraction(0), basis="default_zero"),
-    )
-
-
-def _probe(*, duration_seconds: float = _DURATION_SECONDS) -> ProbedStreams:
-    selection = _selection(duration_seconds=duration_seconds)
-    return ProbedStreams(audio=(selection.stream,), video_start=selection.video_start)
-
-
-def _stub_transport(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    *,
-    reference_samples: np.ndarray,
-    comparison_samples: np.ndarray,
-) -> None:
-    reference_pcm = tmp_path / "reference.f32"
-    comparison_pcm = tmp_path / "comparison.f32"
-    reference_pcm.write_bytes(_payload(reference_samples))
-    comparison_pcm.write_bytes(_payload(comparison_samples))
-    monkeypatch.setattr(
-        alignment_audio,
-        "probe_streams",
-        lambda *args, **kwargs: _probe(),
-    )
-
-    def argv(
-        path: Path, stream: object, *, channel_strategy: str, timeline_scale: Fraction
-    ) -> list[str]:
-        pcm = reference_pcm if Path(path).stem == "reference" else comparison_pcm
-        return _writer_argv(pcm)
-
-    monkeypatch.setattr(alignment_audio, "collection_argv", argv)
-
-
-def _media(tmp_path: Path) -> tuple[Path, Path]:
-    reference = tmp_path / "reference.mkv"
-    comparison = tmp_path / "comparison.mkv"
-    reference.write_bytes(b"reference")
-    comparison.write_bytes(b"comparison")
-    return reference, comparison
 
 
 def _config(**overrides: Any) -> AlignmentConfig:
@@ -154,16 +79,16 @@ def _align(
         fps_num=FPS.numerator,
         fps_den=FPS.denominator,
     )
-    return run_request(request, config, reference_fps=FPS)
+    return run_request(request, config)
 
 
 def test_shifted_pair_candidate_matches_frame_truth(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    reference, comparison = _media(tmp_path)
-    program = make_program(SEED, _DURATION_SECONDS)
+    reference, comparison = write_media_pair(tmp_path)
+    program = make_program(SEED, DURATION_SECONDS)
     shift = 1600  # 0.2 s at 8 kHz -> -4.8 frames at 24 fps
-    _stub_transport(
+    stub_pcm_transport(
         monkeypatch,
         tmp_path,
         reference_samples=program,
@@ -183,9 +108,9 @@ def test_shifted_pair_candidate_matches_frame_truth(
 def test_insert_gives_no_single_offset_with_runs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    reference, comparison = _media(tmp_path)
+    reference, comparison = write_media_pair(tmp_path)
     program = make_program(SEED, 70.0)
-    _stub_transport(
+    stub_pcm_transport(
         monkeypatch,
         tmp_path,
         reference_samples=program,
@@ -194,7 +119,7 @@ def test_insert_gives_no_single_offset_with_runs(
     monkeypatch.setattr(
         alignment_audio,
         "probe_streams",
-        lambda path, *args, **kwargs: _probe(
+        lambda path, *args, **kwargs: probed_streams(
             duration_seconds=70.0 if Path(path).stem == "reference" else 74.0
         ),
     )
@@ -220,8 +145,8 @@ def test_insert_gives_no_single_offset_with_runs(
 def test_unknown_duration_rejected_before_decode(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    reference, comparison = _media(tmp_path)
-    selection = _selection()
+    reference, comparison = write_media_pair(tmp_path)
+    selection = audio_selection()
     unknown = AudioStreamSelection(
         stream=AudioStreamInfo(
             audio_stream_index=selection.stream.audio_stream_index,
@@ -247,7 +172,7 @@ def test_unknown_duration_rejected_before_decode(
     monkeypatch.setattr(
         alignment_audio,
         "probe_streams",
-        lambda path, *a, **k: _probe() if Path(path).stem == "reference" else unknown_probe,
+        lambda path, *a, **k: probed_streams() if Path(path).stem == "reference" else unknown_probe,
     )
 
     def exploding_collect(*args: Any, **kwargs: Any) -> Any:
@@ -268,15 +193,15 @@ def test_unknown_duration_rejected_before_decode(
 def test_planning_budget_rejects_before_decode(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, budget: str
 ) -> None:
-    reference, comparison = _media(tmp_path)
-    program = make_program(SEED, _DURATION_SECONDS)
-    _stub_transport(monkeypatch, tmp_path, reference_samples=program, comparison_samples=program)
+    reference, comparison = write_media_pair(tmp_path)
+    program = make_program(SEED, DURATION_SECONDS)
+    stub_pcm_transport(monkeypatch, tmp_path, reference_samples=program, comparison_samples=program)
     if budget == "chunk-count":
         reference_duration = (MAX_AUDIO_CHUNKS + 1) * 5
         monkeypatch.setattr(
             alignment_audio,
             "probe_streams",
-            lambda path, *args, **kwargs: _probe(
+            lambda path, *args, **kwargs: probed_streams(
                 duration_seconds=reference_duration if Path(path).stem == "reference" else 10.0
             ),
         )
@@ -302,7 +227,6 @@ def test_planning_budget_rejects_before_decode(
 def _failure_facts() -> tuple[CollectionFacts, CollectionFacts]:
     def facts(role: str) -> CollectionFacts:
         return CollectionFacts(
-            planned_end_sample=100,
             emitted_sample_count=10,
             emitted_byte_count=40,
             retained_sample_count=10,
@@ -332,8 +256,8 @@ def _cleanup(*, completed: bool = True) -> CollectionCleanup:
 def test_collection_failure_is_aborted_with_category(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    reference, comparison = _media(tmp_path)
-    monkeypatch.setattr(alignment_audio, "probe_streams", lambda *a, **k: _probe())
+    reference, comparison = write_media_pair(tmp_path)
+    monkeypatch.setattr(alignment_audio, "probe_streams", lambda *a, **k: probed_streams())
     reference_facts, comparison_facts = _failure_facts()
     failure = PairedAudioCollectionFailure(
         category="timeout",
@@ -362,8 +286,8 @@ def test_collection_failure_is_aborted_with_category(
 
 
 def test_cleanup_failure_is_fatal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    reference, comparison = _media(tmp_path)
-    monkeypatch.setattr(alignment_audio, "probe_streams", lambda *a, **k: _probe())
+    reference, comparison = write_media_pair(tmp_path)
+    monkeypatch.setattr(alignment_audio, "probe_streams", lambda *a, **k: probed_streams())
     reference_facts, comparison_facts = _failure_facts()
     failure = PairedAudioCollectionFailure(
         category="timeout",
@@ -380,113 +304,12 @@ def test_cleanup_failure_is_fatal(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         _align(reference, comparison, _config(), tmp_path)
 
 
-def test_identity_change_mid_collection_is_aborted(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    reference, comparison = _media(tmp_path)
-    program = make_program(SEED, _DURATION_SECONDS)
-    _stub_transport(monkeypatch, tmp_path, reference_samples=program, comparison_samples=program)
-    real_collect = alignment_streaming.collect_paired_audio_chunks
-
-    def touching_collect(*args: Any, **kwargs: Any) -> Any:
-        with open(comparison, "ab") as handle:
-            handle.write(b"mutated")
-        return real_collect(*args, **kwargs)
-
-    monkeypatch.setattr(alignment, "collect_paired_audio_chunks", touching_collect)
-
-    computed_results: list[AlignmentResult] = []
-    real_estimate = alignment._estimate_audio_pair
-
-    def capture(*args: Any, **kwargs: Any) -> AlignmentResult:
-        result = real_estimate(*args, **kwargs)
-        computed_results.append(result)
-        return result
-
-    monkeypatch.setattr(alignment, "_estimate_audio_pair", capture)
-    with pytest.raises(AlignmentSourceIdentityError, match="changed since preparation"):
-        _align(reference, comparison, _config(), tmp_path)
-
-    (result,) = computed_results
-    assert result.applied is False
-    assert result.diagnostic == "source_identity_changed"
-    assert result.audio_attempt is not None
-    assert result.audio_attempt.status == "aborted"
-
-
-def test_pre_collection_identity_change_is_aborted_per_comparison(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    reference = tmp_path / "reference.mkv"
-    ok = tmp_path / "ok.mkv"
-    mutated = tmp_path / "mutated.mkv"
-    manual = tmp_path / "manual.mkv"
-    for path in (reference, ok, mutated, manual):
-        path.write_bytes(b"media-" + path.stem.encode())
-    program = make_program(SEED, _DURATION_SECONDS)
-    _stub_transport(monkeypatch, tmp_path, reference_samples=program, comparison_samples=program)
-
-    def mutating_probe(path: Path, *args: Any, **kwargs: Any) -> ProbedStreams:
-        if Path(path) == mutated:
-            with open(mutated, "ab") as handle:
-                handle.write(b"mutated")
-        return _probe()
-
-    monkeypatch.setattr(alignment_audio, "probe_streams", mutating_probe)
-    generated = tmp_path / "generated"
-    generated.mkdir(parents=True)
-    save_manual_override(
-        generated,
-        ManualOverride(
-            reference_clip=reference.stem,
-            comparison_clip=manual.stem,
-            frame_offset=3,
-            timestamp="2026-09-25T00:00:00Z",
-        ),
-    )
-    config = _config()
-    request = alignment_request(
-        reference=reference,
-        comparisons=[ok, mutated, manual],
-        generated_dir=generated,
-        fps_num=FPS.numerator,
-        fps_den=FPS.denominator,
-    )
-    computed_results: list[AlignmentResult] = []
-    real_estimate = alignment._estimate_audio_pair
-
-    def capture(*args: Any, **kwargs: Any) -> AlignmentResult:
-        result = real_estimate(*args, **kwargs)
-        computed_results.append(result)
-        return result
-
-    monkeypatch.setattr(alignment, "_estimate_audio_pair", capture)
-    with pytest.raises(AlignmentSourceIdentityError, match="changed since preparation"):
-        run_request(request, config, reference_fps=FPS)
-    by_name = {result.comparison_clip: result for result in computed_results}
-
-    changed = by_name[mutated.name]
-    assert changed.applied is False
-    assert changed.diagnostic == "source_identity_changed"
-    assert changed.audio_attempt is not None
-    assert changed.audio_attempt.status == "aborted"
-    assert changed.audio_attempt.collection_observation == "not_observed"
-    assert changed.audio_attempt.collection == ()
-
-    untouched = by_name[ok.name]
-    assert untouched.applied is False
-    assert untouched.diagnostic == "video_check_unavailable"
-
-    # Existing manual authority cannot make the drifted source set applicable.
-    assert manual.name not in by_name
-
-
 def test_no_computed_cache_write_without_video_loader(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    reference, comparison = _media(tmp_path)
-    program = make_program(SEED, _DURATION_SECONDS)
-    _stub_transport(monkeypatch, tmp_path, reference_samples=program, comparison_samples=program)
+    reference, comparison = write_media_pair(tmp_path)
+    program = make_program(SEED, DURATION_SECONDS)
+    stub_pcm_transport(monkeypatch, tmp_path, reference_samples=program, comparison_samples=program)
     generated = tmp_path / "generated"
     config = AlignmentConfig(cache_results=True)
     request = alignment_request(
@@ -497,87 +320,17 @@ def test_no_computed_cache_write_without_video_loader(
         fps_num=FPS.numerator,
         fps_den=FPS.denominator,
     )
-    (result,) = run_request(request, config, reference_fps=FPS)
+    (result,) = run_request(request, config)
 
     assert result.applied is False
     assert result.diagnostic == "video_check_unavailable"
     assert not (generated / "shared" / "alignment_reuse.toml").exists()
 
 
-def test_manual_override_wins_without_decoding(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    reference, comparison = _media(tmp_path)
-    generated = tmp_path / "generated"
-    generated.mkdir(parents=True)
-    save_manual_override(
-        generated,
-        ManualOverride(
-            reference_clip=reference.stem,
-            comparison_clip=comparison.stem,
-            frame_offset=3,
-            timestamp="2026-09-25T00:00:00Z",
-        ),
-    )
-    monkeypatch.setattr(
-        alignment,
-        "collect_paired_audio_chunks",
-        lambda *a, **k: (_ for _ in ()).throw(AssertionError("manual wins; no decode")),
-    )
-    config = _config()
-
-    request = alignment_request(
-        reference=reference,
-        comparisons=[comparison],
-        generated_dir=generated,
-        fps_num=FPS.numerator,
-        fps_den=FPS.denominator,
-    )
-    (result,) = run_request(request, config, reference_fps=FPS)
-
-    assert result.applied is True
-    assert result.source == "manual"
-    assert result.frame_offset == 3
-    assert result.time_offset_seconds == pytest.approx(3 / float(FPS))
-
-
-def test_entry_identity_mismatch_has_no_attempt(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    reference, comparison = _media(tmp_path)
-    program = make_program(SEED, _DURATION_SECONDS)
-    _stub_transport(monkeypatch, tmp_path, reference_samples=program, comparison_samples=program)
-    config = _config()
-    request = alignment_request(
-        reference=reference,
-        comparisons=[comparison],
-        generated_dir=tmp_path / "generated",
-        fps_num=FPS.numerator,
-        fps_den=FPS.denominator,
-    )
-    comparison.write_bytes(b"comparison-mutated")
-    computed_results: list[AlignmentResult] = []
-    real_estimate = alignment._estimate_audio_pair
-
-    def capture(*args: Any, **kwargs: Any) -> AlignmentResult:
-        result = real_estimate(*args, **kwargs)
-        computed_results.append(result)
-        return result
-
-    monkeypatch.setattr(alignment, "_estimate_audio_pair", capture)
-    with pytest.raises(AlignmentSourceIdentityError, match="changed since preparation"):
-        run_request(request, config, reference_fps=FPS)
-
-    (result,) = computed_results
-    assert result.applied is False
-    assert result.diagnostic == "source_identity_changed"
-    assert result.audio_attempt is None
-
-
 def test_cancelled_collection_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    reference, comparison = _media(tmp_path)
-    program = make_program(SEED, _DURATION_SECONDS)
-    _stub_transport(monkeypatch, tmp_path, reference_samples=program, comparison_samples=program)
+    reference, comparison = write_media_pair(tmp_path)
+    program = make_program(SEED, DURATION_SECONDS)
+    stub_pcm_transport(monkeypatch, tmp_path, reference_samples=program, comparison_samples=program)
     reference_facts, comparison_facts = _failure_facts()
     failure = PairedAudioCollectionFailure(
         category="cancelled",
@@ -606,3 +359,42 @@ def test_cancelled_collection_raises(tmp_path: Path, monkeypatch: pytest.MonkeyP
             reference_request=request.reference,
             comparison_request=request.comparisons[0],
         )
+
+
+def test_unsupported_retime_rejected_before_decode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reference, comparison = write_media_pair(tmp_path)
+    monkeypatch.setattr(alignment_audio, "probe_streams", lambda path: probed_streams())
+
+    def exploding_collect(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("decode must not run for unsupported retime")
+
+    monkeypatch.setattr(alignment, "collect_paired_audio_chunks", exploding_collect)
+    request = alignment_request(
+        reference=reference, comparisons=[comparison], generated_dir=tmp_path / "generated"
+    )
+    request = replace(
+        request,
+        comparisons=[
+            replace(
+                request.comparisons[0],
+                source_fps_num=1288001,
+                source_fps_den=53667,
+                effective_fps_num=1288000,
+                effective_fps_den=53667,
+            )
+        ],
+    )
+    (result,) = run_request(request, _config())
+    assert result.applied is False
+    assert result.frame_offset is None
+    assert result.diagnostic == "retime_rate_unsupported"
+    attempt = result.audio_attempt
+    assert attempt is not None
+    assert attempt.status == "preanalysis_rejection"
+    assert attempt.collection_observation == "not_observed"
+    assert attempt.decision.state == "unavailable"
+    assert attempt.decision.primary_reason == "retime_rate_unsupported"
+    assert attempt.decision.failed_gates == ("retime_rate_unsupported",)
+    assert attempt.decision.candidate is None

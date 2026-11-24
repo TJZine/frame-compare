@@ -21,7 +21,7 @@ def test_probe_hdr_metadata_rejects_malformed_payload(
 ) -> None:
     monkeypatch.setattr(
         "frame_compare.vs.hdr_probe.run_subprocess",
-        lambda _argv, *, timeout_seconds: _completed(payload),
+        lambda _argv, **_kwargs: _completed(payload),
     )
 
     with pytest.raises(FFmpegError):
@@ -84,13 +84,18 @@ def test_probe_hdr_signal_cases(
                 "ffprobe",
                 "-v",
                 "error",
+                "-max_pixels",
+                "33177600",
                 "-select_streams",
-                "v:0",
+                "v",
                 "-show_entries",
-                "stream=color_transfer,color_primaries,color_space",
+                "stream=width,height,color_transfer,color_primaries,color_space:stream_disposition=attached_pic",
                 "-of",
                 "json",
                 "hdr.mkv",
             ],
             timeout_seconds=15.0,
+            abort=None,
+            max_stdout_bytes=256 * 1024,
+            max_stderr_bytes=64 * 1024,
         )

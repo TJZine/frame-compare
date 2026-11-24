@@ -1,14 +1,17 @@
 # Physical Windows Media Runtime Validation
 
-This checklist is the final pre-merge acceptance pass for a coordinated media-runtime
-refresh. It supplements GitHub-hosted Linux, Docker, and Windows packaging checks; it
-does not duplicate them. Run it on the supported physical Windows 10/11 x64 system
-with the intended production GPU and private real-media corpus.
+Run this checklist on a supported physical Windows 10/11 x64 system with the
+intended production GPU and private real-media corpus. Keep the results with the
+hosted Linux, Docker, and Windows packaging evidence.
 
-Do not merge the media-runtime pull request until every required item is recorded as
-passed, failed with an accepted explanation, or explicitly deferred by the maintainer.
-Keep raw command output, JSON diagnostics, hashes, screenshots, and comparison notes
-with the pull-request evidence.
+- Before merging a coordinated media-runtime change, start at
+  [section 1](#1-exact-source-and-repository-gates) and build from the exact pull request head.
+  Record the result or maintainer disposition for every required item before merging.
+- Before promoting a release candidate, start at
+  [Published RC acceptance](#published-rc-acceptance) and use the issued ZIP.
+
+Keep command output, JSON diagnostics, hashes, screenshots, and comparison notes
+with the evidence for the route you ran.
 
 ## Test-system record
 
@@ -19,8 +22,9 @@ Record these facts before changing the machine or installing the candidate bundl
 - GPU model, driver package/version/date, and Vulkan runtime/loader version.
 - PowerShell version and execution policy.
 - Git version.
-- Pull-request number, fetched pull-request head ref, and detached exact
+- For a local build, the pull-request number, fetched head ref, and detached exact
   40-character commit SHA.
+- For a published RC, the release URL, tag, and hosted release and Windows job logs.
 - Python and `uv` versions used for repository validation.
 - Previous portable bundle version/runtime fingerprint used for migration testing.
 - Real-media case identifiers without publishing private filenames when inappropriate.
@@ -29,18 +33,65 @@ The expected candidate profile is:
 
 | Component | Expected Windows identity |
 | --- | --- |
-| Python | 3.13.16 |
-| VapourSynth | R81, API R4.3 |
+| Python | 3.15.2 embeddable CPython, with the optional SQLite extension and DLL omitted |
+| VapourSynth | R82, API R4.3 |
 | L-SMASH-Works | `vapoursynth-lsmas` 1310.0.0.0 / native lineage 1310.0.0.0 |
 | FFMS2 | Absent from the Windows baseline |
-| vs-placebo | 2.0.4 |
-| BestSource (VSView/UI only) | 22 |
-| VSView / CLI parser | 0.12.0 / Cyclopts 5.2.0 |
+| vs-placebo | 2.0.5 |
+| BestSource (VSView/UI only) | 23 |
+| VSView / CLI parser | 0.14.0 / Cyclopts 5.4.2 |
 | vspackrgb | 2.0.0 (Rust extension) |
-| PySide6 family | 6.11.2 |
-| FFmpeg | `n8.1.3-9-g29e619e767`, BtbN win64 LGPL 8.1 build `autobuild-2026-09-30-13-08` |
-| Full runtime fingerprint | `b47d64de188aab069cf3c3b9d51add6d0b3416c5ee175b4c0646b72436219320` |
-| L-SMASH index token | `lsw1310-f125953022b6` |
+| PySide6 family | 6.12.0; WebEngine/PDF distribution metadata 6.12.0.140 |
+| Qt Multimedia | Qt's native Windows backend, with the Qt FFmpeg plugin and DLLs excluded |
+| Standalone FFmpeg | `n8.1.3-27-g8dca1586f4`, BtbN win64 LGPL 8.1 build `autobuild-2026-10-31-12-59` |
+| Full runtime fingerprint | `59b7ca351512938b4da41e5d7b3a06c7c5b37de84c899604c7b8d8b9bba4cd4d` |
+| L-SMASH index token | `lsw1310-47d07506e489` |
+
+## Published RC acceptance
+
+1. Open the published RC on [GitHub Releases](https://github.com/TJZine/frame-compare/releases).
+   Confirm it is a pre-release with the tag `vX.Y.Z-rc.N`. Download both assets
+   from that release into the same directory. Expect exactly
+   `frame-compare-portable-win-x64-<tag>.zip` and the corresponding `.zip.sha256`.
+2. Verify the sidecar and ZIP before extraction. From the download directory,
+   substitute the actual RC tag in the following commands.
+
+   ```powershell
+   $Tag = '<published RC tag>'
+   $ZipName = "frame-compare-portable-win-x64-$Tag.zip"
+   $Zip = (Resolve-Path -LiteralPath $ZipName -ErrorAction Stop).Path
+   $ZipDigest = (Get-FileHash -LiteralPath $Zip -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+   $Sidecar = (Get-Content -LiteralPath "$Zip.sha256" -Raw -Encoding ASCII -ErrorAction Stop).TrimEnd([char[]]"`r`n")
+   if ($Sidecar -cne "$ZipDigest  $ZipName") {
+     throw 'The published ZIP does not match its SHA-256 sidecar.'
+   }
+   $ZipDigest
+   ```
+
+   Record the full ZIP SHA-256. In the Windows scan evidence for this RC, check that
+   `portable_sha256` matches it and record the producer artifact ID.
+3. Use a clean repository checkout. Fetch the fully qualified RC tag from the
+   release repository and peel it to its commit. Check that the commit matches
+   the exact Windows build checkout SHA and the scan evidence's `commit` field.
+
+   ```powershell
+   $TagRef = "refs/tags/$Tag"
+   git fetch --no-tags origin $TagRef
+   if ($LASTEXITCODE -ne 0) { throw "Failed to fetch $TagRef." }
+   $ExpectedBundleCommit = git rev-parse --verify 'FETCH_HEAD^{commit}'
+   if ($LASTEXITCODE -ne 0) { throw "Failed to resolve $TagRef to a commit." }
+   $ExpectedBundleCommit
+   ```
+
+   Record the tag and commit with the hosted build, smoke, packed installer, and
+   scan results. Use this exact commit for the focused repository tests in
+   [section 7](#7-cache-and-index-isolation). Detach at `$ExpectedBundleCommit`
+   and sync the frozen contributor environment before running those tests.
+4. Start at [section 3](#3-extracted-bundle-smoke-tests) with the downloaded `$Zip`.
+   Check `bundle_inventory.json` against `$ExpectedBundleCommit` before running any
+   bundle code. Use the verified ZIP throughout sections 3–11, including the
+   previous-release installation, production GPU and HDR tests, and native VSView
+   panel checks.
 
 ## 1. Exact source and repository gates
 
@@ -93,7 +144,7 @@ uv sync --all-groups --extra vsview --frozen
 uv run --no-sync ruff check .
 uv run --no-sync ruff format --check .
 uv run --no-sync pyright --warnings
-uv run --no-sync bandit -c pyproject.toml -r src --severity-level medium
+bash tools/check_python_security.sh
 uv run --no-sync lint-imports
 uv run --no-sync pytest
 uv run --no-sync zensical build --clean --strict
@@ -123,86 +174,96 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File `
   tools\windows_portable\build_portable.ps1 `
   -ManifestPath $Manifest `
   -RepoRoot $Repo `
+  -ExpectedCommitSha $ExpectedPrHeadSha `
   -OutDir $Candidate `
   -CacheDir $Cache
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 ```
 
-This is the canonical manifest-based build command. For a release run, add
-`-RequireReleasePublicKey` to this same invocation; do not rebuild a second candidate.
-All evidence, packaging, and digest verification must use this exact `$Candidate`.
+This is the canonical manifest-based build command. The builder uses the supplied
+commit for the projected application source, dependency lock and source inventory.
+A local invocation without `-ExpectedCommitSha` resolves `HEAD` once at the start.
+To exercise the release build rules locally, add `-ReleaseBuild` to this invocation.
+Tie local evidence, packaging, and digest verification to this exact `$Candidate`.
 
 Required evidence:
 
 - Every download passes exact byte-size and SHA-256 verification.
+- Every destination declared through `license.files` has the manifest-pinned
+  SHA-256 in the bundle inventory.
 - No artifact is accepted from a mutable fallback URL.
 - The bundle contains `bundle_info.json`, `bundle_inventory.json`,
   `licenses/SOURCE_URLS.txt`, and `licenses/THIRD_PARTY_NOTICES.txt`.
 - `bundle_info.schema_version` is 3, identifying a native-panel-capable full bundle;
-  schema-2 pre-native-panel bundles are not eligible for code-only updates.
+  this schema identifies the layout used by the runtime and installer.
 - The recorded source SHA equals the tested pull-request SHA.
+- The direct libplacebo frame proof reports a separate result before and after
+  Qt initialization. The hosted skip is reserved for Windows exit code
+  `3221225477` with `VK_ERROR_INCOMPATIBLE_DRIVER` or `Failed creating instance`
+  in stderr. Other probe failures fail the build. Record a successful direct
+  frame on the physical Windows GPU.
 - The bundle runtime fingerprint equals the expected value above.
 - FFmpeg is the LGPL-only artifact; no GPL or nonfree build is present.
 - FFMS2 is not present in the Windows bundle or plugin manifests.
 - PySide6 Addons and Qt Multimedia remain present, while Qt WebEngine/Chromium runtime
-  files are absent and both build/extraction verifiers report the required exclusion
-  markers.
+  files are absent. Record the build runtime proof and verify the absence in the ZIP.
+- Record the `WINDOWS_BUNDLE_PROOF qt_multimedia_backend=windows` line, including
+  the audio-device status and output count. The smoke verifies that Qt loaded the
+  bundled Windows media plugin and constructs a stereo 48 kHz Int16 audio sink
+  when a default output exists. A hosted runner can report `audio_device=none`.
+  Verify the Qt FFmpeg plugin and all five Qt FFmpeg DLLs are absent from the ZIP.
+  The standalone BtbN FFmpeg executable is unchanged.
 - L-SMASH-Works and vs-placebo license/source records include their statically bundled
   dependency notices.
 - Native plugins do not depend on unbundled DLLs outside the documented Windows/UCRT
   system surface.
 
-Package `dist/frame-compare-portable-win-x64` as
-`dist/frame-compare-portable-win-x64.zip`, record its SHA-256, verify that digest, and
-verify the ZIP layout before extraction.
+Pack the tested build with the same host Python 3.13 lookup as the builder. Use a
+fresh ZIP path on each run and record its SHA-256 before extraction.
+
+```powershell
+$ExpectedBundleCommit = $ExpectedPrHeadSha
+$HostPython = (& uv python find --system --no-project --no-python-downloads 3.13).Trim()
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$Zip = "$Candidate-$([guid]::NewGuid()).zip"
+& $HostPython -B -I -S tools/windows_portable/portable_bundle.py pack --root $Candidate --output $Zip
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+Get-FileHash -LiteralPath $Zip -Algorithm SHA256
+```
 
 ## 3. Extracted-bundle smoke tests
 
-Extract the candidate ZIP into a new path that is not the repository checkout and is
-not the previous installation. Run commands through the bundle's own shim/runtime,
-not a globally installed Frame Compare environment.
-
-The focused verifier below is also invoked by the hosted workflow's
-`Verify extracted portable bundle` step. It owns ZIP containment/layout, extraction,
-default workspace directories, candidate launcher and doctor checks, installation,
-and installed-shim parity. Every command it reports must exit `0`; a thrown assertion
-is a failed check. The verifier atomically reserves the fresh extraction root, writes
-without overwrite, and retains extracted evidence after any later failure. Its
-expected commit argument must be the recorded detached pull-request head used to build
-the candidate. Each external command is assigned to a kill-on-close Windows Job Object
-before its gated payload starts. Its stdout and stderr streams are independently copied
-to capped evidence files rather than retained in verifier memory. Version stdout is
-capped at 64 KiB and doctor JSON at 4 MiB so successful output cannot exceed its reread
-limit; every other stdout or stderr evidence file is capped at 16 MiB. Exceeding either
-cap preserves that stream's exact capped prefix, immediately terminates the complete
-job, reports the overflowing stream and byte limit, and fails without waiting for the
-command deadline. Each command also has a five-minute deadline; a timeout terminates
-the complete job, fails the verifier, and retains the capped output written so far
-under the extraction root's `command-evidence` directory (with doctor output kept at
-the exact paths supplied below).
+Extract the checked ZIP into a fresh directory outside the repository and the
+previous installation. Check that it contains one portable root. From that root,
+verify that the inventory records the source commit for this route.
 
 ```powershell
-$Zip = (Resolve-Path 'dist\frame-compare-portable-win-x64.zip').Path
-$ExtractRoot = Join-Path $env:TEMP `
-  ("frame-compare-pr{0}-zip-{1}" -f $PrNumber, [guid]::NewGuid().ToString('N'))
-$DoctorStdout = Join-Path $ExtractRoot 'doctor-candidate.json'
-$DoctorStderr = Join-Path $ExtractRoot 'doctor-candidate.stderr.log'
-
-pwsh -NoProfile -ExecutionPolicy Bypass `
-  -File tools\windows_portable\verify_extracted_bundle.ps1 `
-  -ZipPath $Zip `
-  -ExtractRoot $ExtractRoot `
-  -DoctorStdoutPath $DoctorStdout `
-  -DoctorStderrPath $DoctorStderr `
-  -ExpectedCommitSha $ExpectedPrHeadSha `
-  -CommandTimeoutSeconds 300
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$Inventory = Get-Content -LiteralPath '.\bundle_inventory.json' -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+if ($Inventory.bundle.commit_sha -cne $ExpectedBundleCommit) {
+  throw 'The bundle source commit does not match the expected commit.'
+}
 ```
+
+Verify the manifest-pinned notices in the extracted bundle against the inventory.
+From the extracted root, run:
+
+```powershell
+.\python\python.exe -c "import importlib.util, sys; assert sys.version_info[:3] == (3, 15, 2) and sys.version_info.releaselevel == 'final'; assert importlib.util.find_spec('_sqlite3') is None; print(sys.version)"
+.\frame-compare.ps1 --help
+.\frame-compare.ps1 version
+.\frame-compare.ps1 doctor --json 1> doctor-candidate.json 2> doctor-candidate.stderr.log
+```
+
+Confirm that the extracted `python/` directory contains neither `_sqlite3.pyd` nor
+`sqlite3.dll`. Require exit 0 from each command and the exact `frame-compare X.Y.Z` version from
+the candidate. Complete the [ZIP installation check](#8-zip-installation-over-the-previous-release)
+before running checks that use the installed shim. Use the bundled Python and
+VSView for the native-panel check in section 10.
 
 Inspect `doctor-candidate.json`. Required results:
 
 - The observed and expected media-runtime fingerprints match.
-- VapourSynth reports R81 independently from API R4.3.
+- VapourSynth reports R82 independently from API R4.3.
 - `lsmas` registers both `LibavSMASHSource` and `LWLibavSource`.
 - `placebo` registers `Tonemap`.
 - FFMS2 is reported as intentionally absent on Windows, not as a missing requirement.
@@ -211,9 +272,8 @@ Inspect `doctor-candidate.json`. Required results:
 - No plugin DLL is loaded from the standalone FFmpeg directory.
 - No missing shared-library or recursive DLL-probing warning appears.
 
-Retain the verifier's `WINDOWS_EXTRACTED_PROOF` lines. Record its resolved candidate
-launcher, installed shim, doctor stdout/stderr, ZIP and digest artifact paths, every
-reported command exit code, and the hosted `Verify extracted portable bundle` step.
+Record the ZIP digest, launcher paths, exit codes, doctor stdout and stderr, and
+the build and packed ZIP succession job results.
 
 ## 4. Deterministic generated fixtures
 
@@ -293,7 +353,7 @@ retain:
 
 Metric equality alone is not sufficient evidence of perceptual equivalence.
 
-## 7. Cache and index migration
+## 7. Cache and index isolation
 
 Use copies of media so test cleanup cannot damage a production library.
 
@@ -301,14 +361,49 @@ Use copies of media so test cleanup cannot damage a production library.
 
 Verify all of the following:
 
-- A legacy adjacent `<media>.lwi` is ignored and not deleted.
-- The candidate creates
-  `<media>.frame-compare-lsw1310-f125953022b6.lwi`.
-- A second run reuses the candidate-owned index.
-- A corrupt candidate-owned index is removed and regenerated once.
-- A missing index is created normally.
-- An unwritable index location falls back to the documented cache-free open.
-- Indexes from another runtime profile are not silently reused.
+- Use a read-only media directory containing both a legacy `<media>.lwi` and an
+  old runtime-token-named sidecar. Retain their original byte hashes and directory
+  listing. Run the installed CLI and a generated VSView session. Both legacy
+  files and the directory listing must remain unchanged. Deliberately invalid
+  sidecar bytes must have no effect on the decoded result.
+- A first run creates an index and commit metadata under
+  `<resolved paths.generated_dir>/cache/source-indexes/`. A second run opens it
+  with `cache=0` and leaves the committed bytes and modification times unchanged.
+  Confirm the warm open still probes headers and reuses the committed geometry
+  proof. Cold opens and the private fallback, including in VSView, scan complete
+  coded and visible frame geometry before the native open.
+- On NTFS, replace source bytes in place with the same byte length and restore the
+  original modification time. The next run must reject the old index because the
+  handle-reported ChangeTime changed. Repeat a normal cold write and warm hit to
+  prove the staged index flush succeeds with the Windows write-capable handle.
+- A missing or corrupt managed entry rebuilds in a private staging directory.
+  Invalid metadata, geometry policy or probe mismatches, runtime-token or digest
+  mismatches, and redirected entries cannot authorize stable reuse. An unwritable
+  cache falls back to a cache-free open.
+- Confirm cancellation and failures do not commit incomplete index metadata, and
+  the native plugin never creates or changes an index in the media directory.
+
+Run the focused process and cache cases from the exact candidate checkout on Windows:
+
+```powershell
+uv run --no-sync pytest -o addopts="" -q -ra `
+  tests/utils/test_subproc.py::test_windows_child_uses_kill_on_close_job `
+  tests/utils/test_subproc.py::test_windows_failed_assignment_stops_and_reaps_child `
+  tests/utils/test_subproc.py::test_windows_reports_job_close_failure_after_reaping_leader `
+  tests/utils/test_subproc.py::test_successful_leader_cannot_leave_a_capture_pipe_open `
+  tests/services/test_alignment_paired_streaming.py::test_paired_collection_finishes_when_descendant_inherits_pipe `
+  tests/vs/test_source_index_cache.py::test_cold_write_warm_hit_and_same_length_source_overwrite `
+  tests/vs/test_source_index_cache.py::test_source_overwrite_after_index_replace_prevents_metadata_commit
+```
+
+The application starts its children with normal `Popen` and immediately assigns
+them to a preconfigured kill-on-close Job Object. The focused assignment tests
+use a simulated Win32 API. On Windows, verify bounded cleanup and that a job-owned
+descendant retaining an inherited capture pipe stops after its leader exits. Also
+close or cancel an installed VSView review and a paired FFmpeg alignment run and
+check for leftover descendants. A descendant can escape if it starts in the small
+interval before assignment. An interrupt inside `Popen` can also prevent the
+application from receiving the handle needed for cleanup.
 
 ### Application caches
 
@@ -319,35 +414,26 @@ Verify with old and newly generated data:
 - Alignment reuse misses when the standalone FFmpeg lineage differs.
 - Render/run metadata records the complete candidate runtime contract.
 - `--from-cache-only` fails closed when only stale cache data exists.
-- `--no-cache` does not read or persist reusable cache data.
+- `--no-cache` removes the matching analysis entry, recomputes, and persists a fresh
+  entry; repeated runs without it then hit. See the
+  [run command contract](current-cli-contract.md#run-command-contract).
 - Repeated candidate runs produce valid cache hits without changing selected frames.
 - Unrelated cache scopes are not invalidated without a documented reason.
 
-## 8. Portable update boundary
+## 8. ZIP installation over the previous release
 
-Keep one untouched installation of the immediate predecessor to this R81 candidate:
-the R80 / VSView 0.11.0 / vspackrgb 1.4.0 / August 2026 FFmpeg bundle with
-full runtime fingerprint
-`a17abda6b032c5568e557f881c018d2220230c832c612b75c7461e03d0eb4ba8`.
-Retain an older schema-2 installation separately when available for the
-pre-native-panel refusal case.
-
-Required cases:
-
-1. Build the candidate code-only update ZIP and its manifest.
-2. Attempt to apply it to the previous bundle.
-3. Confirm refusal occurs before file replacement because the previous bundle's
-   full media-runtime fingerprint differs from the candidate's.
-4. With otherwise matching candidate fingerprints, confirm a schema-2 bundle still
-   refuses before file replacement.
-5. Confirm an unsafe Python-dependency override does not bypass that refusal.
-6. Confirm the error directs the user to install the complete portable bundle.
-7. Install/extract the complete candidate bundle and confirm generated data stored
-   outside the bundle remains available.
-8. Apply a code-only update whose required fingerprint matches the candidate bundle.
-9. Verify backup creation, successful apply, rollback, and hash restoration.
-10. Test missing, malformed, and legacy runtime-fingerprint metadata; each must fail
-   closed without partially updating the installation.
+Keep a separate active installation of v0.6.1 with test data in the bundle's
+config, input, and generated folders. Check the candidate ZIP against the digest
+recorded for your route. Extract it into a fresh directory on the same volume
+as v0.6.1 and run `install.cmd` before uninstalling anything. Open a new terminal
+and use the installed shim to check `frame-compare --help`, the candidate version,
+existing config, and run history. Check the moved configuration, sources, run folder, and report assets
+in the candidate. Check that the previous bundle's application remains usable
+and that the installed AppData fallback and any configured external generated-data
+root retain their contents. Check `install.cmd -UserData Leave` with a separate test
+installation. If you run the v0.6.1 installer again, it reactivates v0.6.1 and
+restores its updater. The moved folders stay in the candidate. To test moving
+data back with `install.cmd`, use two bundles that support carry-over.
 
 ## 9. End-to-end comparisons
 
@@ -378,6 +464,8 @@ passes, record these remaining interactive checks on a physical Windows 10/11 x6
 system:
 
 - open a real Frame Compare-generated session through the installed portable launcher;
+- verify audible VSView playback through the Windows output device with the
+  [alignment-review audio fixture](#alignment-review-audio-fixture);
 - verify the panel is discoverable from VSView's Tool Panel and remains inert in an
   ordinary VSView session;
 - verify one `Reference` and ordered `Comparison N` tabs, current-frame context, bounded
@@ -397,26 +485,53 @@ system:
 
 Record exact bundle SHA, OS/GPU/driver/runtime facts, commands, logs, sidecar fixtures,
 screenshots, and pass/fail results. Hosted or macOS offscreen proof must not be reported
-as physical Windows desktop acceptance. Linux X11 visible-launch proof is also
-unavailable until `bash tools/verify_docker_gui.sh` runs on a compatible Linux desktop;
-its offscreen contract does not establish visible ergonomics.
+as physical Windows desktop acceptance.
+
+### Alignment-review audio fixture
+
+The generated session registers video outputs. To check audio playback with the
+alignment panel open, use disposable inputs and give the reference a known audible
+track. Copy the generated script to a separate directory, keeping its filename,
+and append this after the existing `run_session(...)` call:
+
+```python
+import vapoursynth as vs
+from vsview import set_output
+
+audio = vs.core.bs.AudioSource(SESSION_DATA["reference"]["path"], cachemode=0)
+set_output(audio, "Reference audio")
+```
+
+From the extracted candidate root, open the copied script in a fresh PowerShell
+session. Substitute its absolute path:
+
+```powershell
+$env:QT_MEDIA_BACKEND = 'windows'
+$env:FRAME_COMPARE_RUNTIME_KIND = 'windows-portable'
+.\python\python.exe -m frame_compare.vsview.launcher --no-settings '<copied session script>'
+```
+
+Open the alignment panel, select **Reference audio**, and play the reference. Record
+whether the sound is audible. Close the fixture without saving an alignment result.
+Use the original generated session for the production panel and result checks.
 
 ## 11. Completion record
 
-Summarize the physical pass in the pull request with:
+Record the physical results in the media-runtime pull request for a local build
+or in the promotion pull request for a published RC. Include the following.
 
 - Tested commit SHA and bundle ZIP SHA-256.
+- For a published RC, the release URL, tag, hosted run URL, and producer artifact ID.
 - Test-system and GPU/driver identity.
 - Passed, failed, skipped, and unavailable cases.
 - Exact real-media categories exercised.
 - Source-loader behavior changes and their classifications.
-- Cache/index and updater migration results.
+- Cache/index and ZIP installation results.
 - HDR/Dolby Vision objective and perceptual findings.
 - Residual risks or platform-specific limitations.
 - Independent final reviewer identity/session, reviewed commit SHA, verdict, and any
   findings or accepted counter-evidence.
-- A clear merge recommendation.
+- A clear recommendation on whether to merge or promote.
 
-Do not mark the pull request ready or merge it while a production-significant failure
-is unresolved. Preserve this checklist as the authoritative handoff rather than
-reconstructing requirements from chat history.
+Resolve production-significant failures before marking the media-runtime pull
+request ready or promoting the RC.

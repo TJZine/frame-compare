@@ -87,11 +87,6 @@ Open a new terminal; if needed, rerun `install.cmd` from the bundle’s current 
 
 Rerun `install.cmd` from the new bundle location to update installed state.
 
-### Code-only update reports a runtime fingerprint mismatch
-
-Install the complete portable ZIP for that release; code-only updates cannot replace
-native media components.
-
 ### Report opens without images
 
 Keep `report.html` beside its `screenshots/` directory or rerun the comparison with
@@ -104,7 +99,9 @@ entry.
 
 ### `--no-cache` and `--from-cache-only` are rejected together
 
-Choose one: the first disables cache use, the second requires it.
+`--no-cache` deletes and recomputes the matching analysis cache entry, while
+`--from-cache-only` requires an existing entry, so they cannot be combined. See
+[Cache Mode Semantics](../current-cli-contract.md#cache-mode-semantics).
 
 ### Docker prints `without an L-SMASH index cache`
 
@@ -170,8 +167,7 @@ frames. To confirm or enter an offset by eye, use
 ### Rendering and HDR
 
 Confirm source loading, range/transfer/primaries evidence, vs-placebo availability, and
-Vulkan initialization. Avoid enabling an FFmpeg-only path as a workaround when HDR
-frames still require VapourSynth tonemapping.
+Vulkan initialization.
 
 ### Report or browser behavior
 
@@ -212,7 +208,7 @@ Clear only the state related to the problem:
 | Analysis cache entry | Metric identity or source freshness is known to be stale outside normal detection |
 | Probe cache entry | Source properties were cached under an unmanaged runtime that changed |
 | Alignment reuse entry | A previously accepted offset is no longer valid for the source relationship |
-| Frame Compare-owned `.lwi` | The unmanaged decoder/plugin ABI changed or the owned index is known to be unusable |
+| Managed source index (`cache/source-indexes/`) | With Frame Compare and VSView stopped, clear the managed cache if an unmanaged decoder ABI changed or the index is known to be unusable. Leave media-adjacent files alone. |
 | Browser-local report state | Viewer preferences or notes are corrupt; the run folder itself is still valid |
 
 Do not delete the complete generated-data root as a first response.
@@ -221,7 +217,6 @@ Platform-specific help:
 
 - [Windows portable](../getting-started/windows-portable.md)
 - [Docker](../getting-started/docker.md)
-- [Docker profiles](../getting-started/docker-profiles.md)
 - [Native source](../getting-started/native.md)
 
 For exact error streams, JSON shape, and exit codes, see the

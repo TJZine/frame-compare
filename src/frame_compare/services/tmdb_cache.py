@@ -11,25 +11,37 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import re
 import tomllib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Lock
-from typing import Literal, cast
+from typing import Annotated, Literal, NotRequired, TypedDict, cast
 
 import structlog
 import tomli_w
+from pydantic import (
+    AfterValidator,
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictInt,
+    StrictStr,
+    TypeAdapter,
+    ValidateAs,
+    field_validator,
+)
 
 from frame_compare.services.types import TmdbMetadata
 from frame_compare.utils.atomic_write import write_bytes_atomic
 from frame_compare.utils.file_lock import exclusive_file_lock
+from frame_compare.utils.serialized_decode import SERIALIZED_DECODE_FAILURES
 
 log = structlog.get_logger()
 
-TMDB_CACHE_VERSION = "1"
+TMDB_CACHE_VERSION = "2"
 TMDB_CACHE_MAX_ENTRIES = 2000
 TMDB_CACHE_MAX_BYTES = 5 * 1024 * 1024
 TMDB_CACHE_POSITIVE_TTL = timedelta(days=30)
@@ -38,8 +50,6 @@ TMDB_CACHE_EMPTY_TTL = timedelta(days=1)
 type TmdbCacheEntryKind = Literal["search", "alternative_titles"]
 type _CacheValue = str | int | float | bool | None
 type _StoredValues = tuple[TmdbMetadata, ...] | tuple[str, ...]
-
-_CACHE_KEY_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,62 +73,52 @@ def _format_datetime(value: datetime) -> str:
     return _normalise_datetime(value).isoformat().replace("+00:00", "Z")
 
 
-def _parse_datetime(value: object) -> datetime:
-    if not isinstance(value, str):
-        raise TypeError("stored_at must be a string")
-    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    if parsed.tzinfo is None:
-        raise ValueError("stored_at must include a timezone")
-    return parsed.astimezone(UTC)
-
-
-def _is_non_bool_int(value: object) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool)
-
-
-def _optional_string(entry: Mapping[str, object], field: str) -> str | None:
-    value = entry.get(field)
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        raise TypeError(f"{field} must be a string or absent")
+def _validate_serializable_tmdb_id(value: int) -> int:
+    # tomli_w uses str() to serialize integers when merging cached entries.
+    str(value)
     return value
 
 
-def _load_metadata(value: object) -> TmdbMetadata:
-    if not isinstance(value, Mapping):
-        raise TypeError("search result must be a table")
-    entry = cast(Mapping[str, object], value)
+class _CachedMetadata(TypedDict):
+    tmdb_id: Annotated[StrictInt, AfterValidator(_validate_serializable_tmdb_id)]
+    title: StrictStr
+    original_title: StrictStr
+    year: Annotated[StrictInt, Field(ge=0, le=9999)]
+    media_type: Literal["movie", "tv"]
+    original_language: NotRequired[StrictStr | None]
+    poster_url: NotRequired[StrictStr | None]
+    backdrop_url: NotRequired[StrictStr | None]
 
-    tmdb_id = entry.get("tmdb_id")
-    if not _is_non_bool_int(tmdb_id):
-        raise TypeError("tmdb_id must be an integer")
-    title = entry.get("title")
-    if not isinstance(title, str):
-        raise TypeError("title must be a string")
-    original_title = entry.get("original_title")
-    if not isinstance(original_title, str):
-        raise TypeError("original_title must be a string")
-    year = entry.get("year")
-    if not _is_non_bool_int(year):
-        raise TypeError("year must be an integer")
-    media_type = entry.get("media_type")
-    if media_type not in {"movie", "tv"}:
-        raise ValueError("media_type must be movie or tv")
-    tmdb_id = cast(int, tmdb_id)
-    year = cast(int, year)
-    media_type = cast(Literal["movie", "tv"], media_type)
 
-    return TmdbMetadata(
-        tmdb_id=tmdb_id,
-        title=title,
-        original_title=original_title,
-        year=year,
-        media_type=media_type,
-        original_language=_optional_string(entry, "original_language"),
-        poster_url=_optional_string(entry, "poster_url"),
-        backdrop_url=_optional_string(entry, "backdrop_url"),
-    )
+class _CachedEntry(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    stored_at: AwareDatetime
+
+    @field_validator("stored_at", mode="before")
+    @classmethod
+    def parse_stored_at(cls, value: object) -> datetime:
+        if not isinstance(value, str):
+            raise ValueError("stored_at must be an ISO datetime string")
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+class _CachedSearch(_CachedEntry):
+    kind: Literal["search"]
+    results: tuple[
+        Annotated[TmdbMetadata, ValidateAs(_CachedMetadata, lambda data: TmdbMetadata(**data))],
+        ...,
+    ]
+
+
+class _CachedAlternativeTitles(_CachedEntry):
+    kind: Literal["alternative_titles"]
+    titles: tuple[StrictStr, ...]
+
+
+_ENTRY_ADAPTER = TypeAdapter(
+    Annotated[_CachedSearch | _CachedAlternativeTitles, Field(discriminator="kind")]
+)
 
 
 def _metadata_table(metadata: TmdbMetadata) -> dict[str, object]:
@@ -173,38 +173,6 @@ def cache_key_for_request(
         identity["query_sha256"] = query_hash
     serialized = _canonical_json(identity)
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
-
-
-def _parse_entry(raw: object) -> _StoredEntry:
-    if not isinstance(raw, Mapping):
-        raise TypeError("cache entry must be a table")
-    entry = cast(Mapping[str, object], raw)
-    kind = entry.get("kind")
-    if kind not in {"search", "alternative_titles"}:
-        raise ValueError("unsupported cache entry kind")
-    stored_at = _parse_datetime(entry.get("stored_at"))
-
-    if kind == "search":
-        values_raw = entry.get("results")
-        if not isinstance(values_raw, list):
-            raise TypeError("search results must be an array")
-        values = tuple(_load_metadata(item) for item in cast(list[object], values_raw))
-    else:
-        values_raw = entry.get("titles")
-        if not isinstance(values_raw, list):
-            raise TypeError("alternative titles must be an array")
-        titles: list[str] = []
-        for item in cast(list[object], values_raw):
-            if not isinstance(item, str):
-                raise TypeError("alternative title must be a string")
-            titles.append(item)
-        values = tuple(titles)
-
-    return _StoredEntry(
-        kind=cast(TmdbCacheEntryKind, kind),
-        stored_at=stored_at,
-        values=values,
-    )
 
 
 def _entry_table(entry: _StoredEntry) -> dict[str, object]:
@@ -275,7 +243,7 @@ class TmdbCache:
                 data = tomllib.load(handle)
         except FileNotFoundError:
             return {}
-        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+        except (OSError, *SERIALIZED_DECODE_FAILURES):
             log.warning(
                 "tmdb_cache_read_failed",
                 cache_path=str(self.path),
@@ -303,28 +271,28 @@ class TmdbCache:
             return None
 
         entries: dict[str, _StoredEntry] = {}
-        for raw_key, raw_entry in cast(Mapping[object, object], entries_raw).items():
-            safe_key = (
-                raw_key
-                if isinstance(raw_key, str) and _CACHE_KEY_RE.fullmatch(raw_key)
-                else "<invalid>"
-            )
-            if not isinstance(raw_key, str) or not _CACHE_KEY_RE.fullmatch(raw_key):
+        for key, raw_entry in cast(Mapping[str, object], entries_raw).items():
+            if len(key) != 64 or any(digit not in "0123456789abcdef" for digit in key):
                 log.warning(
                     "tmdb_cache_invalid_entry",
                     cache_path=str(self.path),
-                    entry_key=safe_key,
+                    entry_key="<invalid>",
                     action="ignore_entry",
                     error_type="invalid_key",
                 )
                 continue
             try:
-                entries[raw_key] = _parse_entry(raw_entry)
-            except (TypeError, ValueError, KeyError):
+                entry = _ENTRY_ADAPTER.validate_python(raw_entry)
+                entries[key] = _StoredEntry(
+                    kind=entry.kind,
+                    stored_at=entry.stored_at.astimezone(UTC),
+                    values=entry.results if isinstance(entry, _CachedSearch) else entry.titles,
+                )
+            except (TypeError, ValueError, OverflowError, RecursionError):
                 log.warning(
                     "tmdb_cache_invalid_entry",
                     cache_path=str(self.path),
-                    entry_key=safe_key,
+                    entry_key=key,
                     action="ignore_entry",
                     error_type="malformed_entry",
                 )

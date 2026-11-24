@@ -17,7 +17,6 @@ nav = [
     { "Choose an installation" = "getting-started/index.md" },
     { "Windows portable" = "getting-started/windows-portable.md" },
     { "Docker" = "getting-started/docker.md" },
-    { "Docker profiles" = "getting-started/docker-profiles.md" },
     { "Native source" = "getting-started/native.md" },
     { "Your first comparison" = "getting-started/first-comparison.md" },
   ] },
@@ -99,6 +98,7 @@ toggle.name = "Switch to light mode"
 generator = false
 
 [project.plugins.redirects.redirect_maps]
+"getting-started/docker-profiles.md" = "getting-started/docker.md"
 "windows-portable.md" = "getting-started/windows-portable.md"
 "guides/first-comparison.md" = "getting-started/first-comparison.md"
 "api.md" = "internals/index.md"

@@ -11,6 +11,7 @@ from fractions import Fraction
 from pathlib import Path
 from types import GeneratorType, SimpleNamespace
 from typing import TYPE_CHECKING, cast
+from unittest.mock import MagicMock
 
 import numpy as np
 import numpy.typing as npt
@@ -193,6 +194,14 @@ def test_detect_content_active_rect(
         assert detect_content_active_rect(frames) == expected
 
 
+def test_bright_smooth_edge_is_not_a_black_bar() -> None:
+    frame = np.empty((80, 100), dtype=np.float32)
+    frame[:16, :] = np.linspace(0.40, 0.42, 16, dtype=np.float32)[:, None]
+    frame[16:, :] = 0.45 + 0.5 * _content_pattern(64, 100)
+
+    assert detect_content_active_rect([frame] * 16) is None
+
+
 def test_detector_streams_frames_without_retaining_previous_arrays() -> None:
     def stream_frames() -> Iterator[npt.NDArray[np.float32]]:
         for _index in range(8):
@@ -220,7 +229,7 @@ def test_vs_sampler_fetches_frames_lazily_and_releases_source(
             return _letterbox_frame(top=10, bottom=10)
 
     class FakeNode:
-        format = SimpleNamespace(color_family=1, sample_type=2, bits_per_sample=32)
+        format = SimpleNamespace(color_family=2, sample_type=2, bits_per_sample=32)
 
         def get_frame(self, index: int) -> FakeFrame:
             events.append(f"frame:{index}")
@@ -237,7 +246,7 @@ def test_vs_sampler_fetches_frames_lazily_and_releases_source(
             source_references.append(weakref.ref(source))
             return source
 
-    fake_vs = SimpleNamespace(YUV=1, FLOAT=2, YUV420P8=3)
+    fake_vs = SimpleNamespace(YUV=1, GRAY=2, RGB=3, FLOAT=2)
     monkeypatch.setitem(sys.modules, "vapoursynth", fake_vs)
     sampler = VSActiveRectFrameSampler(cast("VSLoader", FakeLoader()))
 
@@ -255,6 +264,33 @@ def test_vs_sampler_fetches_frames_lazily_and_releases_source(
     assert source_references[0]() is None
 
 
+@pytest.mark.vs_required
+def test_vs_sampler_converts_odd_rgb_with_bt709_luma() -> None:
+    native_vs = pytest.importorskip("vapoursynth")
+    if isinstance(native_vs, MagicMock):
+        pytest.skip("VapourSynth is not installed")
+
+    class Source:
+        clip = native_vs.core.std.BlankClip(
+            width=17,
+            height=15,
+            length=1,
+            format=native_vs.RGBS,
+            color=[1.0, 0.0, 0.0],
+        )
+
+    class Loader:
+        def load(self, _path: Path) -> Source:
+            return Source()
+
+    frames = VSActiveRectFrameSampler(cast("VSLoader", Loader())).sample_luma_frames(_clip(), (0,))
+    frame = next(frames)
+    assert frame.shape == (15, 17)
+    assert float(frame.mean()) == pytest.approx(0.2126, abs=0.001)
+    if isinstance(frames, GeneratorType):
+        frames.close()
+
+
 def test_sample_indices_use_trimmed_selection_window_source_domain() -> None:
     clip = _clip(num_frames=100, trim_start_frames=5)
     selection_window = SelectionWindow(start_frame=10, end_frame_exclusive=30)
@@ -270,22 +306,11 @@ def test_sample_indices_use_trimmed_selection_window_source_domain() -> None:
 
 def test_auto_refinement_does_not_sample_static_non_full_frame_rects() -> None:
     clips = [
-        _clip(num_frames=100),
-        _clip(num_frames=100),
-        _clip(num_frames=100),
-        _clip(num_frames=100),
-    ]
-    clips = [
-        replace(clips[0], active_rect=ClipActiveRect(0, 10, 100, 60, "explicit", "auto")),
-        replace(clips[1], active_rect=ClipActiveRect(0, 10, 100, 60, "metadata", "auto")),
         replace(
-            clips[2],
-            active_rect=ClipActiveRect(0, 10, 100, 60, "dimension-derived", "auto"),
-        ),
-        replace(
-            clips[3],
-            active_rect=ClipActiveRect(0, 10, 100, 60, "aspect-ratio-derived", "auto"),
-        ),
+            _clip(name=f"{source}.mkv"),
+            active_rect=ClipActiveRect(0, 10, 100, 60, source, "auto"),
+        )
+        for source in ("explicit", "dimension-derived", "aspect-ratio-derived")
     ]
 
     class FailingSampler:

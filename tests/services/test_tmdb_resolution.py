@@ -57,11 +57,11 @@ def _movie_result(
 @pytest.mark.parametrize(
     "filename",
     [
-        "The.VVitch.A.New-England.Folktale.2015.2160p.mkv",
-        "The.Witch.2015.2160p.UHD.BDRip.DV.HDR10.x265.mkv",
+        "The.VVexmoor.A.Fen-Country.Folktale.2015.2160p.mkv",
+        "The.Wexmoor.2015.2160p.UHD.BDRip.DV.HDR10.x265.mkv",
     ],
 )
-async def test_resolve_metadata_vvitch_alias(
+async def test_resolve_metadata_word_initial_vv_alias(
     async_client_factory: AsyncClientFactory, filename: str
 ) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
@@ -71,8 +71,8 @@ async def test_resolve_metadata_vvitch_alias(
                 200,
                 json={
                     "results": [
-                        _movie_result(526667, "The Witch", "2015-01-23", popularity=35.0),
-                        _movie_result(310131, "The Witch", "2016-02-19", popularity=30.0),
+                        _movie_result(815001, "The Wexmoor", "2015-03-06", popularity=35.0),
+                        _movie_result(815002, "The Wexmoor", "2016-04-15", popularity=30.0),
                     ]
                 },
             )
@@ -82,16 +82,16 @@ async def test_resolve_metadata_vvitch_alias(
                 json={
                     "results": [
                         _movie_result(
-                            526667,
-                            "The Witch",
-                            "2015-01-23",
+                            815001,
+                            "The Wexmoor",
+                            "2015-03-06",
                             media_type=None,
                             popularity=35.0,
                         ),
                         _movie_result(
-                            310131,
-                            "The Witch",
-                            "2016-02-19",
+                            815002,
+                            "The Wexmoor",
+                            "2016-04-15",
                             media_type=None,
                             popularity=30.0,
                         ),
@@ -100,13 +100,13 @@ async def test_resolve_metadata_vvitch_alias(
             )
         if path.endswith("/search/tv"):
             return httpx.Response(200, json={"results": []})
-        if path.endswith("/movie/310131/alternative_titles"):
+        if path.endswith("/movie/815002/alternative_titles"):
             return httpx.Response(
                 200,
-                json={"titles": [{"title": "The VVitch: A New-England Folktale"}]},
+                json={"titles": [{"title": "The VVexmoor: A Fen-Country Folktale"}]},
             )
-        if path.endswith("/movie/526667/alternative_titles"):
-            return httpx.Response(200, json={"titles": [{"title": "The Witch"}]})
+        if path.endswith("/movie/815001/alternative_titles"):
+            return httpx.Response(200, json={"titles": [{"title": "The Wexmoor"}]})
         return httpx.Response(200, json={"results": []})
 
     config = MetadataConfig(api_key="a" * 32)
@@ -118,7 +118,7 @@ async def test_resolve_metadata_vvitch_alias(
         )
 
     assert result is not None
-    assert result.tmdb_id == 310131
+    assert result.tmdb_id == 815002
 
 
 @pytest.mark.anyio
@@ -157,8 +157,8 @@ async def test_resolve_metadata_returns_none_for_ambiguous_unattended_match(
                 200,
                 json={
                     "results": [
-                        _movie_result(10, "The Witch", "2015-01-01", popularity=20.0),
-                        _movie_result(11, "The Witch", "2016-01-01", popularity=19.0),
+                        _movie_result(10, "The Wexmoor", "2015-01-01", popularity=20.0),
+                        _movie_result(11, "The Wexmoor", "2016-01-01", popularity=19.0),
                     ]
                 },
             )
@@ -167,20 +167,20 @@ async def test_resolve_metadata_returns_none_for_ambiguous_unattended_match(
                 200,
                 json={
                     "results": [
-                        _movie_result(10, "The Witch", "2015-01-01", media_type=None),
-                        _movie_result(11, "The Witch", "2016-01-01", media_type=None),
+                        _movie_result(10, "The Wexmoor", "2015-01-01", media_type=None),
+                        _movie_result(11, "The Wexmoor", "2016-01-01", media_type=None),
                     ]
                 },
             )
         if path.endswith("/search/tv"):
             return httpx.Response(200, json={"results": []})
         if path.endswith("/alternative_titles"):
-            return httpx.Response(200, json={"titles": [{"title": "The Witch"}]})
+            return httpx.Response(200, json={"titles": [{"title": "The Wexmoor"}]})
         return httpx.Response(200, json={"results": []})
 
     config = MetadataConfig(api_key="a" * 32)
     async with async_client_factory(httpx.MockTransport(handler)) as client:
-        result = await resolve_metadata(["The.Witch.2015.mkv"], config, client)
+        result = await resolve_metadata(["The.Wexmoor.2015.mkv"], config, client)
 
     assert result is None
 
@@ -230,8 +230,8 @@ async def test_resolve_tmdb_match_returns_ranked_candidates_when_unresolved(
                 200,
                 json={
                     "results": [
-                        _movie_result(10, "The Witch", "2015-01-01", popularity=20.0),
-                        _movie_result(11, "The Witch", "2016-01-01", popularity=19.0),
+                        _movie_result(10, "The Wexmoor", "2015-01-01", popularity=20.0),
+                        _movie_result(11, "The Wexmoor", "2016-01-01", popularity=19.0),
                     ]
                 },
             )
@@ -240,19 +240,19 @@ async def test_resolve_tmdb_match_returns_ranked_candidates_when_unresolved(
                 200,
                 json={
                     "results": [
-                        _movie_result(10, "The Witch", "2015-01-01", media_type=None),
-                        _movie_result(11, "The Witch", "2016-01-01", media_type=None),
+                        _movie_result(10, "The Wexmoor", "2015-01-01", media_type=None),
+                        _movie_result(11, "The Wexmoor", "2016-01-01", media_type=None),
                     ]
                 },
             )
         if path.endswith("/search/tv"):
             return httpx.Response(200, json={"results": []})
         if path.endswith("/alternative_titles"):
-            return httpx.Response(200, json={"titles": [{"title": "The Witch"}]})
+            return httpx.Response(200, json={"titles": [{"title": "The Wexmoor"}]})
         return httpx.Response(200, json={"results": []})
 
     config = MetadataConfig(api_key="a" * 32)
-    parsed = ParsedMetadata(title="The Witch", year=2015)
+    parsed = ParsedMetadata(title="The Wexmoor", year=2015)
     async with async_client_factory(httpx.MockTransport(handler)) as client:
         outcome = await resolve_tmdb_match(parsed, config, client)
 
@@ -352,7 +352,7 @@ async def test_resolve_tmdb_match_searches_variants_with_bounded_concurrency(
         return httpx.Response(200, json={"results": []})
 
     config = MetadataConfig(api_key="a" * 32)
-    parsed = ParsedMetadata(title="The VVitch IV: Chapter 2", year=2024)
+    parsed = ParsedMetadata(title="The VVexmoor IV: Chapter 2", year=2024)
     async with async_client_factory(httpx.MockTransport(handler)) as client:
         outcome = await resolve_tmdb_match(parsed, config, client)
 

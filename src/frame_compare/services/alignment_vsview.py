@@ -4,21 +4,20 @@ from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import structlog
 
 from frame_compare.services.alignment_keys import alignment_key
-from frame_compare.services.alignment_manual_overrides import ManualOverride, save_manual_override
-from frame_compare.services.alignment_sources import require_current_alignment_clips
 from frame_compare.services.errors import AudioAlignmentError
 from frame_compare.services.types import AlignmentConfig, AlignmentReviewSummary
 from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.utils.progress_protocol import ProgressReporter
 from frame_compare.utils.terminal import stream_is_tty
+from frame_compare.utils.terminal_sections import take_run_block_separator
 from frame_compare.utils.types import AlignmentClipRequest
+from frame_compare.vs.loader import DefaultVSLoader
 from frame_compare.vsview.adapter import (
     VSViewAvailabilityStatus,
     VSViewConfig,
@@ -39,6 +38,9 @@ from frame_compare.vsview.output import (
     print_vsview_review_result,
     print_vsview_unavailable,
 )
+
+if TYPE_CHECKING:
+    from frame_compare.vs.loader import VSLoader
 
 log = structlog.get_logger()
 
@@ -105,13 +107,16 @@ def _ensure_forced_availability(
 ) -> None:
     if is_available:
         return
+    hint = "Run 'frame-compare doctor' to check VSView, or drop --force-interactive-alignment."
     if status == VSViewAvailabilityStatus.PROBE_FAILED:
         raise AudioAlignmentError(
-            f"Interactive alignment requested but VSView {probe_failure_reason}."
+            f"Interactive alignment requested but VSView {probe_failure_reason}.",
+            hint=hint,
         )
     raise AudioAlignmentError(
         "Interactive alignment requested but VSView and the Frame Compare panel "
-        "are not available in this Python environment."
+        "are not available in this Python environment.",
+        hint=hint,
     )
 
 
@@ -200,30 +205,6 @@ def _present_optional_launch_failed(
     )
 
 
-def _save_confirmed_offsets(
-    *,
-    reference: Path,
-    comparisons: list[Path],
-    cache_dir: Path,
-    confirmed_offsets_by_key: dict[str, int],
-) -> None:
-    timestamp = datetime.now(UTC).isoformat().replace("+00:00", "Z")
-    for comparison in comparisons:
-        raise_if_cancelling()
-        key = alignment_key(reference, comparison)
-        if key not in confirmed_offsets_by_key:
-            continue
-        save_manual_override(
-            cache_dir,
-            ManualOverride(
-                reference_clip=reference.stem,
-                comparison_clip=comparison.stem,
-                frame_offset=confirmed_offsets_by_key[key],
-                timestamp=timestamp,
-            ),
-        )
-
-
 def _suspend_progress_for_interaction(progress: ProgressReporter | None) -> bool:
     if progress is None:
         return False
@@ -283,22 +264,6 @@ def _confirmed_frame_pairs(
     )
 
 
-def format_vsview_review_message(pairs_confirmed: int, kept_count: int) -> str:
-    """Format the VSView review result message with correct plurals."""
-    message = (
-        "Accepted 1 confirmed pair"
-        if pairs_confirmed == 1
-        else f"Accepted {pairs_confirmed} confirmed pairs"
-    )
-    if kept_count == 1:
-        message += "; 1 comparison kept its current offset."
-    elif kept_count > 1:
-        message += f"; {kept_count} comparisons kept their current offset."
-    else:
-        message += "."
-    return message
-
-
 def _handle_invalid_result(
     exc: AlignmentReviewContractError,
     *,
@@ -313,7 +278,7 @@ def _handle_invalid_result(
     if tty_status.stderr:
         print_vsview_review_result(
             accepted=False,
-            message=f"{reason}; current offsets were retained.",
+            message=reason,
             no_color=config.no_color,
         )
         log.debug("vsview_review_result_rejected", reason=reason)
@@ -325,12 +290,12 @@ def maybe_launch_alignment_vsview(
     *,
     reference: AlignmentClipRequest,
     comparisons: list[AlignmentClipRequest],
-    offsets_by_key: dict[str, int | None],
     audio_review_by_key: dict[str, str],
     cache_dir: Path,
     config: AlignmentConfig,
     progress: ProgressReporter | None,
     frame_props_by_stem: dict[str, dict[str, str | int | float]] | None = None,
+    vs_loader: VSLoader | None = None,
     verbose: bool = False,
 ) -> AlignmentVSViewOutcome:
     """Launch one native review and apply only a complete, trusted result."""
@@ -362,7 +327,7 @@ def maybe_launch_alignment_vsview(
         tty_status=tty_status,
     )
     if progress:
-        progress.set_description("ALIGN | Native VSView review")
+        progress.set_description("Align · VSView review")
     if config.force_interactive and launch_decision.no_tty:
         raise AudioAlignmentError(
             "Interactive alignment requested but no interactive terminal (TTY) is available."
@@ -370,6 +335,18 @@ def maybe_launch_alignment_vsview(
 
     reference_path = reference.path
     comparison_paths = [comparison.path for comparison in comparisons]
+    source_indexes = (
+        {
+            path: index
+            for path in (reference_path, *comparison_paths)
+            if (index := vs_loader.validated_index(path)) is not None
+        }
+        if isinstance(vs_loader, DefaultVSLoader)
+        else None
+    )
+    source_index_generated_root = (
+        vs_loader.source_index_generated_root if isinstance(vs_loader, DefaultVSLoader) else None
+    )
     progress_suspended = _suspend_progress_for_interaction(progress)
     review_seconds = 0.0
     try:
@@ -377,10 +354,17 @@ def maybe_launch_alignment_vsview(
             request=VSViewSessionRequest(
                 reference=reference_path,
                 comparisons=comparison_paths,
-                suggested_offsets_by_key=offsets_by_key,
                 audio_review_by_key=audio_review_by_key,
                 cache_dir=cache_dir,
+                source_indexes=source_indexes,
+                source_index_generated_root=source_index_generated_root,
+                scan_frame_geometry=(
+                    vs_loader.scan_frame_geometry
+                    if isinstance(vs_loader, DefaultVSLoader)
+                    else False
+                ),
                 memory_limit_mb=config.memory_limit_mb,
+                preview_tonemap=config.preview_tonemap,
                 frame_props_by_stem=frame_props_by_stem,
                 presentation_names_by_stem={
                     reference_path.stem: reference.presentation_name or reference_path.stem,
@@ -407,6 +391,9 @@ def maybe_launch_alignment_vsview(
                 verbose=verbose,
             ),
         )
+        if launch_decision.enabled:
+            # The child printed its own waiting block and trailing separator.
+            take_run_block_separator()
         review_seconds = max(0.0, wait_seconds)
         if launch_decision.no_tty:
             _log_no_tty(session.script_path, tty_status)
@@ -423,22 +410,7 @@ def maybe_launch_alignment_vsview(
 
         raise_if_cancelling()
         confirmed_offsets = _confirmed_offsets(result)
-        if confirmed_offsets:
-            require_current_alignment_clips([reference, *comparisons])
-        _save_confirmed_offsets(
-            reference=reference_path,
-            comparisons=comparison_paths,
-            cache_dir=cache_dir,
-            confirmed_offsets_by_key=confirmed_offsets,
-        )
         kept_count = len(result.decisions) - len(confirmed_offsets)
-        pairs_confirmed = len(confirmed_offsets)
-        message = format_vsview_review_message(pairs_confirmed, kept_count)
-        print_vsview_review_result(
-            accepted=True,
-            message=message,
-            no_color=config.no_color,
-        )
         return AlignmentVSViewOutcome(
             confirmed_offsets,
             "confirmed" if confirmed_offsets else "keep_current",

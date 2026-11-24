@@ -4,9 +4,6 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-# Most enums use lowercase string values (Pydantic accepts lowercase only).
-# Exception: LogLevel uses uppercase values per standard Python logging convention.
-
 
 class OverlayMode(StrEnum):
     """Overlay verbosity level for rendered screenshots."""
@@ -69,12 +66,17 @@ class TonemapPreset(StrEnum):
     """Named tonemap preset applied when tonemapping HDR to SDR."""
 
     REFERENCE = "reference"
-    FILMIC = "filmic"
     CONTRAST = "contrast"
-    BT2390_SPEC = "bt2390_spec"
     SPLINE = "spline"
     BRIGHT_LIFT = "bright_lift"
     HIGHLIGHT_GUARD = "highlight_guard"
+
+
+class TonemapSpeed(StrEnum):
+    """Source-peak policy for tone mapping."""
+
+    QUALITY = "quality"
+    FAST = "fast"
 
 
 class ToneCurve(StrEnum):
@@ -128,6 +130,7 @@ __all__ = [
     "SourceMatchFpsMode",
     "ToneCurve",
     "TonemapPreset",
+    "TonemapSpeed",
     "ViewerMode",
     "Visibility",
     "VsScreenshotWriter",

@@ -8,5 +8,9 @@ function Get-AppVersionFromSource([string]$RepoRootPath) {
   if (!$match.Success) {
     throw "Could not parse __version__ from $initPy"
   }
-  return $match.Groups[1].Value
+  $version = $match.Groups[1].Value
+  if ($version -cnotmatch '\A(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:rc[1-9][0-9]*)?\z') {
+    throw "Malformed app version '$version' in $initPy"
+  }
+  return $version
 }

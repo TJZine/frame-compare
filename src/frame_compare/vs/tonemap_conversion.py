@@ -4,12 +4,18 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from math import isfinite
 from typing import TYPE_CHECKING
 
 from frame_compare.utils.cancellation import raise_if_cancelling
 from frame_compare.vs.errors import TonemapError
-from frame_compare.vs.props import detect_hdr, get_optional_int_prop, get_optional_range_prop
-from frame_compare.vs.types import HDRMetadata, TonemapSettings
+from frame_compare.vs.props import (
+    detect_hdr,
+    get_optional_int_prop,
+    get_optional_range_prop,
+    props_indicate_limited_range,
+)
+from frame_compare.vs.types import HDRMetadata, ResolvedSourcePeak, TonemapSettings
 
 if TYPE_CHECKING:
     import vapoursynth as vs
@@ -121,6 +127,17 @@ def _conversion_kwargs(
     return kwargs
 
 
+def reject_limited_rgb(clip: vs.VideoNode, props: Mapping[str, object]) -> None:
+    """Reject RGB input whose samples are explicitly marked limited-range."""
+    import vapoursynth as vs
+
+    if clip.format.color_family == vs.RGB and props_indicate_limited_range(props) is True:
+        raise TonemapError(
+            reason="Limited-range RGB input is unsupported for tonemapping",
+            hint="Convert the source to full-range RGB before tonemapping",
+        )
+
+
 def convert_non_rgb_with_matrix_hint(
     clip: vs.VideoNode,
     *,
@@ -139,7 +156,7 @@ def convert_non_rgb_with_matrix_hint(
         detected_is_hdr=detected_is_hdr,
     )
     raise_if_cancelling()
-    return clip.resize.Bicubic(**kwargs)  # type: ignore[attr-defined]
+    return clip.resize.Bicubic(**kwargs)
 
 
 def to_rgbs(
@@ -152,6 +169,11 @@ def to_rgbs(
     import vapoursynth as vs
 
     try:
+        if clip.format.color_family == vs.RGB:
+            if props is None:
+                raise_if_cancelling()
+                props = dict(clip.get_frame(0).props)
+            reject_limited_rgb(clip, props)
         if clip.format.id != vs.RGBS:
             if clip.format.color_family == vs.RGB:
                 raise_if_cancelling()
@@ -164,6 +186,8 @@ def to_rgbs(
                 detected_is_hdr=detected_is_hdr,
             )
         return clip
+    except TonemapError:
+        raise
     except Exception as e:
         raise TonemapError(
             reason=f"Failed to convert to RGBS: {e}",
@@ -172,7 +196,7 @@ def to_rgbs(
 
 
 def apply_post_processing(clip: vs.VideoNode, settings: TonemapSettings) -> vs.VideoNode:
-    """Apply unified post-processing (contrast recovery and gamma lift)."""
+    """Apply the optional gamma lift after tonemapping."""
     try:
         if settings.gamma_lift:
             raise_if_cancelling()
@@ -184,6 +208,62 @@ def apply_post_processing(clip: vs.VideoNode, settings: TonemapSettings) -> vs.V
             reason=f"Post-processing failed: {e}",
             hint="Check post-processing parameters",
         ) from e
+
+
+def libplacebo_output_to_srgb(
+    clip: vs.VideoNode, *, black_nits: float, white_nits: float
+) -> vs.VideoNode:
+    """Encode known BT.1886 native output as endpoint-relative browser sRGB.
+
+    This boundary is specific to libplacebo's SDR destination. It must not be
+    applied to arbitrary SDR sources or the degraded tonemap fallback. RGBS is
+    encoded RGB here, not linear light; source PQ props must not drive a resize
+    transfer conversion. Black and white map to sRGB zero and one respectively.
+    """
+    import vapoursynth as vs
+
+    if not (isfinite(black_nits) and isfinite(white_nits) and 0 < black_nits < white_nits):
+        raise TonemapError(
+            reason="sRGB export requires explicit 0 < destination black < destination white",
+            hint="Use positive dst_min_nits below target_nits; zero lets libplacebo infer black",
+        )
+    ratio = black_nits / white_nits
+    black = ratio ** (1 / 2.4)
+    linear = (
+        f"x 0 max 1 min {1 - black:.17g} * {black:.17g} + 2.4 pow "
+        f"{ratio:.17g} - {1 - ratio:.17g} / 0 max 1 min"
+    )
+    expression = (
+        f"{linear} 0.0031308 <= {linear} 12.92 * {linear} {1 / 2.4:.17g} pow 1.055 * 0.055 - ?"
+    )
+    raise_if_cancelling()
+    clip = clip.std.Expr(expr=[expression] * 3, format=vs.RGBS)
+    clip = clip.std.RemoveFrameProps(
+        props=[
+            "DolbyVisionRPU",
+            "PLSceneMax",
+            "PLSceneAvg",
+            "ContentLightLevelMax",
+            "ContentLightLevelAverage",
+            "MasteringDisplayMaxLuminance",
+            "MasteringDisplayMinLuminance",
+            "MasteringDisplayPrimariesX",
+            "MasteringDisplayPrimariesY",
+            "MasteringDisplayPrimaries",
+            "MasteringDisplayWhitePointX",
+            "MasteringDisplayWhitePointY",
+            "_ChromaLocation",
+        ]
+    )
+    # Write only modern _Range: R81 aliases legacy _ColorRange to the same key.
+    return clip.std.SetFrameProps(
+        _Matrix=0,
+        _Transfer=13,
+        _Primaries=1,
+        _Range=1,
+        _Tonemapped=1,
+        _FrameCompareExpandRange=0,
+    )
 
 
 def resolve_hdr_tonemap_inputs(
@@ -214,3 +294,14 @@ def _set_unspecified_signal(props: dict[str, object], key: str, value: object) -
     """Fill one missing color signal without overriding explicit frame metadata."""
     if _specified_int_prop(props, key) is None and isinstance(value, int):
         props[key] = value
+
+
+def resolve_source_peak(
+    settings: TonemapSettings, metadata: HDRMetadata | None
+) -> ResolvedSourcePeak:
+    """Resolve the peak used by either graph, retaining the original precedence."""
+    if settings.source_peak is not None:
+        return ResolvedSourcePeak(settings.source_peak, "configured")
+    if metadata is not None and metadata.max_cll:
+        return ResolvedSourcePeak(metadata.max_cll, "max_cll")
+    return ResolvedSourcePeak(1000, "default")

@@ -112,3 +112,10 @@ def test_source_override_label_is_trimmed_and_strict() -> None:
     for value in ("", "   ", "bad\tlabel", "\nwrapped\n", "\twrapped\r"):
         with pytest.raises(ValidationError):
             SourceOverrideConfig(label=value)
+
+
+@pytest.mark.parametrize("codepoint", [*range(0x202A, 0x202F), *range(0x2066, 0x206A)])
+def test_source_override_rejects_bidi_formatting_controls(codepoint: int) -> None:
+    assert SourceOverrideConfig(label="מקור عربي").label == "מקור عربي"
+    with pytest.raises(ValidationError, match="label must not contain bidirectional formatting"):
+        SourceOverrideConfig(label=f"SRC {chr(codepoint)}ABC")

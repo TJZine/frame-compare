@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from frame_compare.analysis.metric_strategies import MetricComputationResult
 from frame_compare.analysis.metrics import calculate_metrics
+from frame_compare.analysis.types import MetricCacheRequest
 from frame_compare.config.schema import AnalysisConfig
 from frame_compare.vs.loader import VSLoader
 
@@ -40,6 +41,12 @@ def test_calculate_metrics_uses_custom_vs_loader(mock_key, mock_load, tmp_path):
         ),
         patch("frame_compare.analysis.metrics.save_metrics_cache"),
     ):
-        calculate_metrics(video_paths, config, tmp_path, vs_loader=mock_loader)
+        calculate_metrics(
+            MetricCacheRequest(analysis_source_path=None),
+            vs_loader=mock_loader,
+            video_paths=video_paths,
+            config=config,
+            cache_dir=tmp_path,
+        )
 
     mock_loader.load.assert_called_once_with(video_paths[0])

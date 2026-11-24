@@ -8,7 +8,7 @@ from typing import Protocol
 
 import pytest
 
-from frame_compare.config.schema import ConfigSchema
+from frame_compare.config.loader import get_default_config
 from frame_compare.orchestration.context import ClipFingerprint, ClipProbeSnapshot
 from frame_compare.orchestration.preparation import (
     _persist_probe_snapshots_for_run,
@@ -16,6 +16,7 @@ from frame_compare.orchestration.preparation import (
 )
 from frame_compare.orchestration.probing.probe_cache import (
     compute_probe_cache_key,
+    live_probe_fingerprint,
     load_clip_probe_cache,
     merge_shared_clip_probe_cache,
     save_clip_probe_cache,
@@ -42,7 +43,7 @@ def _snapshot(
     width: int = 1920,
 ) -> ClipProbeSnapshot:
     return ClipProbeSnapshot(
-        fingerprint=ClipFingerprint(Path(name), size, mtime),
+        fingerprint=ClipFingerprint(Path(name), size, mtime, source_token="a" * 64),
         width=width,
         height=1080,
         num_frames=100,
@@ -178,7 +179,7 @@ def test_normal_run_folder_probe_cache_excludes_unrelated_shared_entries(tmp_pat
         workspace=workspace,
         input_videos=[current_path],
         deps=RunDependencies(),
-        config=ConfigSchema(),
+        config=get_default_config(),
         overrides_by_path={},
         labels_by_path={current_path: current_path.stem},
         release_identities_by_path={},
@@ -190,24 +191,20 @@ def test_normal_run_folder_probe_cache_excludes_unrelated_shared_entries(tmp_pat
     assert set(load_clip_probe_cache(shared_path)) == {current_key, unrelated_key}
 
 
-def test_shared_merge_invalid_utf8_preserves_unreadable_existing_cache(tmp_path: Path) -> None:
+def test_shared_merge_replaces_invalid_utf8(tmp_path: Path) -> None:
     cache_path = tmp_path / "clip_probe.toml"
     cache_path.write_bytes(b"\xff")
     snapshot = _snapshot("video.mkv")
-    before = cache_path.read_bytes()
+    key = compute_probe_cache_key(snapshot.fingerprint)
 
-    merge_shared_clip_probe_cache(
-        cache_path,
-        {compute_probe_cache_key(snapshot.fingerprint): snapshot},
-    )
+    merge_shared_clip_probe_cache(cache_path, {key: snapshot})
 
-    assert cache_path.read_bytes() == before
+    assert load_clip_probe_cache(cache_path) == {key: snapshot}
 
 
 def _snapshot_from_file(path: Path) -> ClipProbeSnapshot:
-    stats = path.stat()
     return ClipProbeSnapshot(
-        fingerprint=ClipFingerprint(path, stats.st_size, stats.st_mtime_ns),
+        fingerprint=live_probe_fingerprint(path).fingerprint,
         width=1920,
         height=1080,
         num_frames=100,

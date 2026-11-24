@@ -603,6 +603,112 @@ async def test_publish_to_slowpics_maps_ten_column_upload_plan(
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("token", ["token%0D%0Ainjected", "token%00", "x" * 2051])
+async def test_invalid_xsrf_cookie_is_rejected_before_metadata_post(
+    token: str, tmp_path: Path, async_client: httpx.AsyncClient, respx_mock
+) -> None:
+    respx_mock.get("https://slow.pics/comparison").mock(
+        return_value=httpx.Response(200, headers={"Set-Cookie": f"XSRF-TOKEN={token}; Path=/"})
+    )
+    with pytest.raises(SlowpicsError, match="Invalid slow.pics XSRF token"):
+        await publish_to_slowpics(
+            _collection_metadata(),
+            SlowpicsConfig(),
+            async_client,
+            upload_plan=_plan(tmp_path, rows=1, cols=1),
+        )
+    assert len(respx_mock.calls) == 1
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("field", ["key", "firstComparisonKey", "collectionUuid", "images"])
+@pytest.mark.parametrize(
+    "identifier",
+    [
+        "..",
+        "../outside",
+        "id/path",
+        "id\\path",
+        "id%2Fpath",
+        "id\r\nheader",
+        "id\x00",
+        "id?query",
+        "id#fragment",
+        "id ",
+        "іd",
+        "",
+        "x" * 129,
+    ],
+)
+async def test_hostile_metadata_identifier_is_rejected_before_image_upload(
+    field: str,
+    identifier: str,
+    tmp_path: Path,
+    async_client: httpx.AsyncClient,
+    respx_mock,
+) -> None:
+    payload = _metadata_payload(rows=1, cols=1)
+    payload[field] = [[identifier]] if field == "images" else identifier
+    respx_mock.get("https://slow.pics/comparison").mock(
+        return_value=httpx.Response(200, headers={"Set-Cookie": "XSRF-TOKEN=token; Path=/"})
+    )
+    respx_mock.post("https://slow.pics/upload/comparison").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+
+    with pytest.raises(SlowpicsError, match="Invalid metadata response") as error:
+        await publish_to_slowpics(
+            _collection_metadata(),
+            SlowpicsConfig(),
+            async_client,
+            upload_plan=_plan(tmp_path, rows=1, cols=1),
+        )
+
+    assert (
+        error.value.context.message == "slow.pics error: Invalid metadata response from slow.pics"
+    )
+    assert [call.request.url.path for call in respx_mock.calls] == [
+        "/comparison",
+        "/upload/comparison",
+    ]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("identifier", ["a", "a_" * 64])
+async def test_metadata_identifier_boundaries_are_usable(
+    identifier: str,
+    tmp_path: Path,
+    async_client: httpx.AsyncClient,
+    respx_mock,
+) -> None:
+    respx_mock.get("https://slow.pics/comparison").mock(
+        return_value=httpx.Response(200, headers={"Set-Cookie": "XSRF-TOKEN=token; Path=/"})
+    )
+    respx_mock.post("https://slow.pics/upload/comparison").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "key": identifier,
+                "firstComparisonKey": identifier,
+                "collectionUuid": identifier,
+                "images": [[identifier]],
+            },
+        )
+    )
+    image_route = respx_mock.post(f"https://slow.pics/upload/image/{identifier}").mock(
+        return_value=httpx.Response(200)
+    )
+    result = await publish_to_slowpics(
+        _collection_metadata(),
+        SlowpicsConfig(),
+        async_client,
+        upload_plan=_plan(tmp_path, rows=1, cols=1),
+    )
+    assert result.url == f"https://slow.pics/c/{identifier}"
+    assert image_route.call_count == 1
+
+
+@pytest.mark.anyio
 async def test_publish_to_slowpics_metadata_response_count_mismatch_fails_before_image_upload(
     tmp_path: Path,
     async_client: httpx.AsyncClient,
@@ -683,6 +789,45 @@ async def test_publish_to_slowpics_metadata_response_column_mismatch_fails_befor
         )
 
     assert all(route.call_count == 0 for route in image_routes)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "response_images",
+    [
+        [["same-image", "same-image"]],
+        [["same-image"], ["same-image"]],
+    ],
+)
+async def test_duplicate_metadata_image_ids_fail_before_any_image_upload(
+    tmp_path: Path,
+    async_client: httpx.AsyncClient,
+    respx_mock,
+    response_images: list[list[str]],
+) -> None:
+    upload_plan = _plan(tmp_path, rows=len(response_images), cols=len(response_images[0]))
+    respx_mock.get("https://slow.pics/comparison").mock(
+        return_value=httpx.Response(200, headers={"Set-Cookie": "XSRF-TOKEN=token; Path=/"})
+    )
+    respx_mock.post("https://slow.pics/upload/comparison").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                **_metadata_payload(rows=len(response_images), cols=len(response_images[0])),
+                "images": response_images,
+            },
+        )
+    )
+    image_route = respx_mock.post("https://slow.pics/upload/image/same-image").mock(
+        return_value=httpx.Response(400, headers={"X-Error-Message": "IMAGE_IS_COMPLETE"})
+    )
+
+    with pytest.raises(SlowpicsError, match="Invalid metadata response"):
+        await publish_to_slowpics(
+            _collection_metadata(), SlowpicsConfig(), async_client, upload_plan=upload_plan
+        )
+
+    assert image_route.call_count == 0
 
 
 @pytest.mark.anyio

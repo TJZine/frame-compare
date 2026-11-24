@@ -14,7 +14,6 @@ config_dir = "config"
 enable = false
 
 [screenshots]
-use_ffmpeg = true
 active_rect_detection = "aspect_ratio"
 
 [report]
@@ -48,7 +47,6 @@ config_dir = "config"
 enable = true
 
 [screenshots]
-use_ffmpeg = true
 active_rect_detection = "aspect_ratio"
 
 [report]

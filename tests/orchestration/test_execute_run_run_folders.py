@@ -19,9 +19,7 @@ from frame_compare.analysis.metric_identity import (
 from frame_compare.analysis.types import (
     ClipIdentity,
     FrameMetrics,
-    MetricActiveRect,
     MetricCacheRequest,
-    MetricFrameRange,
     MetricsAcquisition,
     MetricsMetadata,
 )
@@ -30,17 +28,17 @@ from frame_compare.config.overrides import CLIConfigOverrides
 from frame_compare.config.schema import AnalysisConfig
 from frame_compare.errors import PathEscapesRootError
 from frame_compare.orchestration import phase_selection, preparation
-from frame_compare.orchestration.coordinator import RunDependencies, RunRequest, execute_run
+from frame_compare.orchestration.coordinator import RunDependencies, execute_run
 from frame_compare.orchestration.probing.probe_cache import load_clip_probe_cache
-from frame_compare.services.alignment_manual_overrides import MANUAL_OVERRIDES_FILE
-from frame_compare.services.run_folder import RunFolderReservation, reserve_run_folder
+from frame_compare.services.run_folder import RunFolderReservation
 from frame_compare.vs.types import SourceInfo
+from tests.run_request_support import make_run_request
 
 from .execute_run_helpers import (
-    FakeFFmpegRunner,
     FakeVSLoader,
     analysis_selection_domain_for_cache_inputs,
     create_video_files,
+    install_fake_frame_render,
     metric_cache_fingerprint,
     write_metrics_cache,
     write_probe_cache_for_inputs,
@@ -62,11 +60,7 @@ dark_frame_count = 1
 )
 
 
-def _reserve_expected_source_run_name(tmp_path: Path) -> str:
-    return reserve_run_folder(
-        tmp_path / "expected_run_names",
-        filenames=["source.mkv"],
-    ).folder_name
+_OLD_RUN_NAME = "historical run"
 
 
 class ClipStub:
@@ -100,6 +94,7 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path, content=METRIC_RUN_FOLDERS_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
@@ -128,18 +123,18 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
     analysis_cache_path = cache_io.find_metrics_cache_file(analysis_cache_dir, fingerprint)
 
     run_generated_dir.mkdir(parents=True, exist_ok=True)
-    manual_overrides_path = run_generated_dir / MANUAL_OVERRIDES_FILE
-    manual_overrides_path.write_text('version = "1"\n', encoding="utf-8")
 
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         no_cache=True,
         skip_analysis=False,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
 
-    def _fake_calculate_metrics(**_kwargs: object) -> MetricsAcquisition:
+    def _fake_calculate_metrics(
+        request: MetricCacheRequest, **_kwargs: object
+    ) -> MetricsAcquisition:
         return MetricsAcquisition(
             metrics=_frame_metrics(
                 luminance=[0.1] * 100,
@@ -152,7 +147,6 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
                         path=str(source_path),
                         size=source_path.stat().st_size,
                         mtime=source_path.stat().st_mtime,
-                        sha1=None,
                     )
                 ],
             ),
@@ -160,12 +154,11 @@ def test_execute_run_no_cache_deletes_shared_cache_when_run_folders_enabled(
         )
 
     monkeypatch.setattr(phase_selection, "calculate_metrics", _fake_calculate_metrics)
-    deps = RunDependencies(vs_loader=AnalysisCapableVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    deps = RunDependencies(vs_loader=AnalysisCapableVSLoader())
 
     asyncio.run(execute_run(request, deps=deps))
 
     assert not cast(Path, analysis_cache_path).exists()
-    assert manual_overrides_path.exists()
 
 
 def test_execute_run_from_cache_only_does_not_reserve_run_folder_when_probe_cache_missing(
@@ -174,27 +167,27 @@ def test_execute_run_from_cache_only_does_not_reserve_run_folder_when_probe_cach
     create_config(tmp_path, content=METRIC_RUN_FOLDERS_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
-    run_name = _reserve_expected_source_run_name(tmp_path)
-    run_dir = tmp_path / "generated" / run_name
 
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
     deps = RunDependencies(vs_loader=FakeVSLoader())
 
     with pytest.raises(MetricsCalculationError):
         asyncio.run(execute_run(request, deps=deps))
 
-    assert not run_dir.exists()
+    assert not list((tmp_path / "generated").glob("*/run_info.toml"))
 
 
 def test_execute_run_from_cache_only_uses_shared_cache_when_run_folders_enabled(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path, content=METRIC_RUN_FOLDERS_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
@@ -204,18 +197,19 @@ def test_execute_run_from_cache_only_uses_shared_cache_when_run_folders_enabled(
     cache_dir = tmp_path / "generated" / "cache" / "analysis"
     write_metrics_cache(cache_dir, source_path=source_path, config=config)
 
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    deps = RunDependencies(vs_loader=FakeVSLoader())
 
     result = asyncio.run(execute_run(request, deps=deps))
 
-    run_name = _reserve_expected_source_run_name(tmp_path)
+    assert result.screenshot_dir is not None
+    run_name = result.screenshot_dir.parent.name
     assert result.success is True
     assert result.cache_hit is True
     assert result.warnings == []
@@ -236,15 +230,14 @@ def test_execute_prep_external_input_reserves_outputs_only_under_generated(
 
     prep = asyncio.run(
         preparation.execute_prep(
-            RunRequest(
+            make_run_request(
                 root=root,
                 skip_analysis=True,
                 skip_metadata=True,
-                config_overrides=CLIConfigOverrides(input_dir=external_input, no_upload=True),
+                overrides=CLIConfigOverrides(input_dir=external_input, no_upload=True),
             ),
             deps=RunDependencies(
                 vs_loader=FakeVSLoader(),
-                ffmpeg_runner=FakeFFmpegRunner(),
             ),
         )
     )
@@ -273,11 +266,11 @@ def test_execute_prep_creates_missing_generated_root_only_during_reservation(
 
     prep = asyncio.run(
         preparation.execute_prep(
-            RunRequest(
+            make_run_request(
                 root=tmp_path,
                 skip_analysis=True,
                 skip_metadata=True,
-                config_overrides=CLIConfigOverrides(no_upload=True),
+                overrides=CLIConfigOverrides(no_upload=True),
             ),
             deps=RunDependencies(vs_loader=FakeVSLoader()),
         )
@@ -304,11 +297,11 @@ def test_execute_prep_external_generated_root_owns_run_and_shared_state(
 
     prep = asyncio.run(
         preparation.execute_prep(
-            RunRequest(
+            make_run_request(
                 root=tmp_path,
                 skip_analysis=True,
                 skip_metadata=True,
-                config_overrides=CLIConfigOverrides(no_upload=True),
+                overrides=CLIConfigOverrides(no_upload=True),
             ),
             deps=RunDependencies(vs_loader=FakeVSLoader()),
         )
@@ -360,11 +353,11 @@ def test_execute_prep_reserves_under_resolved_generated_root_symlink(
 
     prep = asyncio.run(
         preparation.execute_prep(
-            RunRequest(
+            make_run_request(
                 root=tmp_path,
                 skip_analysis=True,
                 skip_metadata=True,
-                config_overrides=CLIConfigOverrides(no_upload=True),
+                overrides=CLIConfigOverrides(no_upload=True),
             ),
             deps=RunDependencies(vs_loader=FakeVSLoader()),
         )
@@ -404,23 +397,25 @@ def test_execute_prep_rejects_junctioned_reserved_run_directory(
     with pytest.raises(PathEscapesRootError):
         asyncio.run(
             preparation.execute_prep(
-                RunRequest(
+                make_run_request(
                     root=tmp_path,
                     skip_analysis=True,
                     skip_metadata=True,
-                    config_overrides=CLIConfigOverrides(no_upload=True),
+                    overrides=CLIConfigOverrides(no_upload=True),
                 ),
                 deps=RunDependencies(vs_loader=FakeVSLoader()),
             )
         )
 
     assert not run_dir.exists()
+    assert not list((tmp_path / "generated").glob("*/run_info.toml"))
 
 
 def test_execute_run_custom_generated_dir_run_folders_saves_and_loads_shared_cache(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     config_content = """\
 [paths]
 input_dir = "comparison_videos"
@@ -435,7 +430,6 @@ dark_frame_count = 1
 enable = false
 
 [screenshots]
-use_ffmpeg = true
 active_rect_detection = "aspect_ratio"
 
 [report]
@@ -452,29 +446,22 @@ enable = false
     )
 
     def _fake_calculate_metrics(
+        request: MetricCacheRequest,
         *,
         video_paths: list[Path],
         config: AnalysisConfig,
         cache_dir: Path,
-        analysis_source_path: Path | None = None,
-        metric_active_rect: MetricActiveRect | None = None,
-        metric_frame_range: MetricFrameRange | None = None,
         selection_domain: str | None = None,
         **_kwargs: object,
     ) -> MetricsAcquisition:
-        resolved_analysis_source_path = (
-            video_paths[0] if analysis_source_path is None else analysis_source_path
-        )
+        resolved_analysis_source_path = request.analysis_source_path or video_paths[0]
+        metric_frame_range = request.metric_frame_range
+        metric_active_rect = request.metric_active_rect
         cache_fingerprint = cache_io.compute_cache_key(
             video_paths,
             config,
             selection_domain=selection_domain,
-            metric_request=MetricCacheRequest(
-                analysis_source_path=resolved_analysis_source_path,
-                metric_frame_range=metric_frame_range,
-                effective_fps=Fraction(24, 1),
-                metric_active_rect=metric_active_rect,
-            ),
+            metric_request=request,
         )
         stats_by_path = {path: path.stat() for path in video_paths}
         metrics = FrameMetrics(
@@ -505,7 +492,6 @@ enable = false
                 metric_backend=metric_backend(config),
                 algorithm_identity_json=stable_metric_algorithm_identity_json(config),
                 metric_active_rect=metric_active_rect,
-                version=cache_io.CACHE_VERSION,
             ),
         )
         cache_io.save_metrics_cache(metrics, cache_dir)
@@ -515,16 +501,13 @@ enable = false
 
     first = asyncio.run(
         execute_run(
-            RunRequest(
+            make_run_request(
                 root=tmp_path,
                 skip_analysis=False,
                 skip_metadata=True,
-                config_overrides=CLIConfigOverrides(no_upload=True),
+                overrides=CLIConfigOverrides(no_upload=True),
             ),
-            deps=RunDependencies(
-                vs_loader=AnalysisCapableVSLoader(),
-                ffmpeg_runner=FakeFFmpegRunner(),
-            ),
+            deps=RunDependencies(vs_loader=AnalysisCapableVSLoader()),
         )
     )
 
@@ -536,24 +519,21 @@ enable = false
     assert (tmp_path / "custom_generated" / "clip_probe.toml").exists()
     assert not any(input_dir.glob("*/generated/cache/analysis/*.compframes"))
 
-    def _fail_calculate_metrics(**_kwargs: object) -> NoReturn:
+    def _fail_calculate_metrics(request: MetricCacheRequest, **_kwargs: object) -> NoReturn:
         raise AssertionError("from-cache-only should load the shared analysis cache")
 
     monkeypatch.setattr(phase_selection, "calculate_metrics", _fail_calculate_metrics)
 
     second = asyncio.run(
         execute_run(
-            RunRequest(
+            make_run_request(
                 root=tmp_path,
                 from_cache_only=True,
                 skip_analysis=False,
                 skip_metadata=True,
-                config_overrides=CLIConfigOverrides(no_upload=True),
+                overrides=CLIConfigOverrides(no_upload=True),
             ),
-            deps=RunDependencies(
-                vs_loader=AnalysisCapableVSLoader(),
-                ffmpeg_runner=FakeFFmpegRunner(),
-            ),
+            deps=RunDependencies(vs_loader=AnalysisCapableVSLoader()),
         )
     )
 
@@ -572,7 +552,9 @@ enable = false
 
 def test_execute_run_cache_only_run_folder_probe_snapshot_excludes_unrelated_shared_entries(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path, content=METRIC_RUN_FOLDERS_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv", "unrelated.mkv")
@@ -593,17 +575,14 @@ def test_execute_run_cache_only_run_folder_probe_snapshot_excludes_unrelated_sha
 
     result = asyncio.run(
         execute_run(
-            RunRequest(
+            make_run_request(
                 root=tmp_path,
                 from_cache_only=True,
                 skip_analysis=False,
                 skip_metadata=True,
-                config_overrides=CLIConfigOverrides(no_upload=True),
+                overrides=CLIConfigOverrides(no_upload=True),
             ),
-            deps=RunDependencies(
-                vs_loader=AnalysisCapableVSLoader(),
-                ffmpeg_runner=FakeFFmpegRunner(),
-            ),
+            deps=RunDependencies(vs_loader=AnalysisCapableVSLoader()),
         )
     )
 
@@ -618,14 +597,13 @@ def test_execute_run_cache_only_run_folder_probe_snapshot_excludes_unrelated_sha
 
 def test_execute_run_normal_rerun_creates_fresh_run_folder_and_uses_shared_cache(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path, content=METRIC_RUN_FOLDERS_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
 
-    run_name = _reserve_expected_source_run_name(tmp_path)
-    existing_run_dir = tmp_path / "generated" / run_name
-    existing_run_dir.mkdir(parents=True)
     config = load_config(tmp_path / "config" / "config.toml")
     source_path = input_dir / "source.mkv"
     write_metrics_cache(
@@ -634,14 +612,18 @@ def test_execute_run_normal_rerun_creates_fresh_run_folder_and_uses_shared_cache
         config=config,
     )
 
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         skip_analysis=False,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    deps = RunDependencies(vs_loader=FakeVSLoader())
 
+    first = asyncio.run(execute_run(request, deps=deps))
+    assert first.screenshot_dir is not None
+    existing_run_dir = first.screenshot_dir.parent
+    run_name = existing_run_dir.name
     result = asyncio.run(execute_run(request, deps=deps))
 
     assert result.success is True
@@ -652,7 +634,7 @@ def test_execute_run_normal_rerun_creates_fresh_run_folder_and_uses_shared_cache
     run_dirs = [
         path
         for path in (tmp_path / "generated").iterdir()
-        if path.is_dir() and (path.name == run_name or path.name.startswith(f"{run_name}_"))
+        if path.is_dir() and (path.name == run_name or path.name.startswith(f"{run_name} ("))
     ]
     assert len(run_dirs) == 2
     assert [path for path in input_dir.iterdir() if path.is_dir()] == []
@@ -660,25 +642,27 @@ def test_execute_run_normal_rerun_creates_fresh_run_folder_and_uses_shared_cache
 
 def test_execute_run_from_cache_only_ignores_old_run_folder_cache(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    install_fake_frame_render(monkeypatch)
     create_config(tmp_path, content=METRIC_RUN_FOLDERS_CONFIG)
     input_dir = tmp_path / "comparison_videos"
     create_video_files(input_dir, "source.mkv")
 
-    run_name = _reserve_expected_source_run_name(tmp_path)
+    run_name = _OLD_RUN_NAME
     run_generated_dir = tmp_path / "generated" / run_name / "generated"
     source_path = input_dir / "source.mkv"
     config = load_config(tmp_path / "config" / "config.toml")
     write_metrics_cache(run_generated_dir / "cache", source_path=source_path, config=config)
 
-    request = RunRequest(
+    request = make_run_request(
         root=tmp_path,
         from_cache_only=True,
         skip_analysis=False,
         skip_metadata=True,
-        config_overrides=CLIConfigOverrides(no_upload=True),
+        overrides=CLIConfigOverrides(no_upload=True),
     )
-    deps = RunDependencies(vs_loader=FakeVSLoader(), ffmpeg_runner=FakeFFmpegRunner())
+    deps = RunDependencies(vs_loader=FakeVSLoader())
 
     with pytest.raises(MetricsCalculationError):
         asyncio.run(execute_run(request, deps=deps))

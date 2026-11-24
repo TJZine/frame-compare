@@ -6,7 +6,7 @@ from dataclasses import replace
 from fractions import Fraction
 
 from frame_compare.services.alignment_decision import ALIGNMENT_ESTIMATOR_POLICY
-from frame_compare.utils.alignment_evidence import (
+from frame_compare.services.alignment_evidence import (
     AlignmentStabilitySummary,
     AudioAlignmentAttempt,
     AudioAlignmentDecision,
@@ -39,10 +39,14 @@ def audio_review(suggestion: int | None) -> str:
                 "origin": "shared_computed_offsets" if suggestion is not None else "none",
                 "frame_offset": suggestion,
             },
-            "evidence_availability": (
-                "historical_details_unavailable" if suggestion is not None else "not_computed"
-            ),
-            "audio_attempt": None,
+            "decision_state": None,
+            "candidate_offset": None,
+            "summary_lines": [
+                f"Accepted audio alignment reused: {suggestion:+d}f — APPLIED"
+                if suggestion is not None
+                else "No usable audio candidate (no usable audio signal) — NOT APPLIED"
+            ],
+            "detail_lines": ["Historical audio details unavailable."],
         },
         sort_keys=True,
         separators=(",", ":"),
@@ -60,7 +64,7 @@ def subframe_estimate(lag: int) -> float:
 
 def stream(role: str, digest: str) -> SelectedAudioStreamEvidence:
     return SelectedAudioStreamEvidence(
-        role="reference" if role == "reference" else "comparison",  # type: ignore[arg-type]
+        role="reference" if role == "reference" else "comparison",
         source_identity_digest=digest,
         audio_stream_index=0,
         absolute_stream_index=1,
@@ -169,7 +173,7 @@ def attempt_shell(
     return AudioAlignmentAttempt(
         reference_identity_digest=REFERENCE_DIGEST,
         comparison_identity_digest=COMPARISON_DIGEST,
-        comparison_ordinal=ordinal,  # type: ignore[arg-type]
+        comparison_ordinal=ordinal,
         status=status,  # type: ignore[arg-type]
         estimator_policy=ALIGNMENT_ESTIMATOR_POLICY,
         diagnostic_policy=_DIAGNOSTIC_POLICY,

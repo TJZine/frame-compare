@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
+import stat
 import subprocess
 import sys
 import tarfile
@@ -31,6 +32,15 @@ _BUNDLED_FONT_BYTES = (_FONT_ASSET_DIR / "Inter-Regular.ttf").read_bytes()
 _BUNDLED_FONT_LICENSE = (_FONT_ASSET_DIR / "Inter-OFL.txt").read_text(encoding="utf-8").encode()
 
 
+_PACKAGE_SOURCE = _FONT_ASSET_DIR.parents[1]
+_REPORT_ASSET_DIR = _PACKAGE_SOURCE / "services/report/assets"
+_PACKAGE_FILES = {
+    path.relative_to(_PACKAGE_SOURCE.parent).as_posix(): path.read_bytes()
+    for path in [*_REPORT_ASSET_DIR.iterdir(), _PACKAGE_SOURCE / "py.typed"]
+    if path.is_file()
+}
+
+
 def _record_row(name: str, data: bytes) -> str:
     digest = base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode()
     return f"{name},sha256={digest},{len(data)}"
@@ -49,9 +59,12 @@ def _write_wheel(
     include_bundled_license: bool = True,
     bundled_font_bytes: bytes | None = None,
     duplicate_member: str | None = None,
+    omit_package_file: str | None = None,
+    symlink_package_file: str | None = None,
 ) -> None:
     wheel = dist_dir / "frame_compare-0.1.0-py3-none-any.whl"
     contents: dict[str, bytes] = {
+        **{name: data for name, data in _PACKAGE_FILES.items() if name != omit_package_file},
         "frame_compare/__init__.py": b'__version__ = "0.1.0"\n',
         f"{metadata_dist_info}/METADATA": METADATA.encode(),
         f"{license_dist_info}/licenses/LICENSE": b"GPL text",
@@ -73,7 +86,13 @@ def _write_wheel(
 
     with zipfile.ZipFile(wheel, "w") as archive:
         for name, value in contents.items():
-            archive.writestr(name, value)
+            if name == symlink_package_file:
+                info = zipfile.ZipInfo(name)
+                info.create_system = 3
+                info.external_attr = (stat.S_IFLNK | 0o777) << 16
+                archive.writestr(info, value)
+            else:
+                archive.writestr(name, value)
         if duplicate_member is not None:
             duplicate_name = f"{metadata_dist_info}/{duplicate_member}"
             archive.writestr(duplicate_name, contents[duplicate_name])
@@ -106,23 +125,39 @@ def _add_tar_text(archive: tarfile.TarFile, name: str, value: str) -> None:
 def _write_sdist(
     dist_dir: Path,
     *,
-    extra_name: str | None = None,
+    extra_path: str | None = None,
     extra_member_type: bytes | None = None,
     include_bundled_font: bool = True,
     include_bundled_license: bool = True,
     bundled_font_bytes: bytes | None = None,
     bundled_asset_root: str | None = None,
+    readme_case: str = "regular",
+    omit_package_file: str | None = None,
+    explicit_root: bool = True,
 ) -> None:
     sdist = dist_dir / "frame_compare-0.1.0.tar.gz"
     root = "frame_compare-0.1.0"
     asset_root = root if bundled_asset_root is None else bundled_asset_root
     with tarfile.open(sdist, "w:gz") as archive:
-        root_directory = tarfile.TarInfo(root)
-        root_directory.type = tarfile.DIRTYPE
-        archive.addfile(root_directory)
+        if explicit_root:
+            root_directory = tarfile.TarInfo(root)
+            root_directory.type = tarfile.DIRTYPE
+            archive.addfile(root_directory)
         _add_tar_text(archive, f"{root}/PKG-INFO", METADATA)
         _add_tar_text(archive, f"{root}/LICENSE", "GPL text")
-        _add_tar_text(archive, f"{root}/README.md", "# Frame Compare")
+        if readme_case == "outside":
+            _add_tar_text(archive, "elsewhere/README.md", "# Frame Compare")
+        elif readme_case == "directory":
+            directory = tarfile.TarInfo(f"{root}/README.md")
+            directory.type = tarfile.DIRTYPE
+            archive.addfile(directory)
+        else:
+            _add_tar_text(archive, f"{root}/README.md", "# Frame Compare")
+            if readme_case == "duplicate":
+                _add_tar_text(archive, f"{root}/README.md", "second copy")
+        for name, data in _PACKAGE_FILES.items():
+            if name != omit_package_file:
+                _add_tar_bytes(archive, f"{root}/src/{name}", data)
         _add_tar_text(archive, f"{root}/pyproject.toml", "[project]")
         _add_tar_text(archive, f"{root}/src/frame_compare/__init__.py", "")
         if include_bundled_font:
@@ -137,8 +172,8 @@ def _write_sdist(
                 f"{asset_root}/src/frame_compare/assets/fonts/Inter-OFL.txt",
                 _BUNDLED_FONT_LICENSE,
             )
-        if extra_name is not None:
-            _add_tar_text(archive, f"{root}/{extra_name}", "unexpected")
+        if extra_path is not None:
+            _add_tar_text(archive, extra_path, "unexpected")
         if extra_member_type is not None:
             special = tarfile.TarInfo(f"{root}/special-member")
             special.type = extra_member_type
@@ -157,9 +192,12 @@ def _run_verifier(repo_root: Path, dist_dir: Path) -> subprocess.CompletedProces
     )
 
 
-def test_distribution_verifier_accepts_expected_artifacts(tmp_path: Path, repo_root: Path) -> None:
+@pytest.mark.parametrize("explicit_root", [True, False], ids=["explicit-root", "implicit-root"])
+def test_distribution_verifier_accepts_expected_artifacts(
+    tmp_path: Path, repo_root: Path, explicit_root: bool
+) -> None:
     _write_wheel(tmp_path)
-    _write_sdist(tmp_path)
+    _write_sdist(tmp_path, explicit_root=explicit_root)
 
     result = _run_verifier(repo_root, tmp_path)
 
@@ -330,7 +368,7 @@ def test_distribution_verifier_rejects_local_environment_state(
     tmp_path: Path, repo_root: Path
 ) -> None:
     _write_wheel(tmp_path)
-    _write_sdist(tmp_path, extra_name=".venv/bin/python")
+    _write_sdist(tmp_path, extra_path="frame_compare-0.1.0/.venv/bin/python")
 
     result = _run_verifier(repo_root, tmp_path)
 
@@ -419,3 +457,91 @@ def test_distribution_verifier_rejects_special_sdist_members(
 
     assert result.returncode != 0
     assert "contains unsupported member types" in result.stderr
+
+
+@pytest.mark.parametrize("case", ["outside", "directory", "duplicate"])
+def test_distribution_verifier_requires_one_regular_readme_under_sdist_root(
+    tmp_path: Path, repo_root: Path, case: str
+) -> None:
+    _write_wheel(tmp_path)
+    _write_sdist(tmp_path, readme_case=case)
+
+    result = _run_verifier(repo_root, tmp_path)
+
+    assert result.returncode != 0
+    assert (
+        "must contain exactly one README.md file at 'frame_compare-0.1.0/README.md'"
+        in result.stderr
+    )
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "frame_compare-0.1.0",
+        "frame_compare-0.1.0/src/frame_compare/services/report/assets",
+    ],
+    ids=["package-root", "report-assets"],
+)
+def test_distribution_verifier_rejects_file_as_sdist_ancestor(
+    tmp_path: Path, repo_root: Path, path: str
+) -> None:
+    _write_wheel(tmp_path)
+    _write_sdist(tmp_path, extra_path=path, explicit_root=False)
+
+    result = _run_verifier(repo_root, tmp_path)
+
+    assert result.returncode != 0
+    assert f"non-directory ancestor {path!r}" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("path", "diagnostic"),
+    [
+        ("frame_compare-0.1.0/nested/.handoff/local.txt", "contains local or sensitive state"),
+        ("frame_compare-0.1.0/nested/.codex/local.txt", "contains local or sensitive state"),
+        ("frame_compare-0.1.0/nested/.claude/local.txt", "contains local or sensitive state"),
+        ("C:local.txt", "contains an unsafe path"),
+    ],
+    ids=["handoff", "codex", "claude", "drive-qualified"],
+)
+def test_distribution_verifier_rejects_extra_local_state_and_drive_paths(
+    tmp_path: Path, repo_root: Path, path: str, diagnostic: str
+) -> None:
+    _write_wheel(tmp_path)
+    _write_sdist(tmp_path, extra_path=path)
+
+    result = _run_verifier(repo_root, tmp_path)
+
+    assert result.returncode != 0
+    assert diagnostic in result.stderr
+    assert path in result.stderr
+
+
+@pytest.mark.parametrize("artifact", ["wheel", "sdist"])
+@pytest.mark.parametrize(
+    "package_file",
+    ["frame_compare/services/report/assets/viewport.js", "frame_compare/py.typed"],
+    ids=["viewport-js", "py-typed"],
+)
+def test_distribution_verifier_rejects_missing_package_files(
+    tmp_path: Path, repo_root: Path, artifact: str, package_file: str
+) -> None:
+    _write_wheel(tmp_path, omit_package_file=package_file if artifact == "wheel" else None)
+    _write_sdist(tmp_path, omit_package_file=package_file if artifact == "sdist" else None)
+
+    result = _run_verifier(repo_root, tmp_path)
+
+    assert result.returncode != 0
+    assert package_file in result.stderr
+
+
+def test_distribution_verifier_rejects_wheel_asset_symlink(tmp_path: Path, repo_root: Path) -> None:
+    asset = "frame_compare/services/report/assets/viewport.js"
+    _write_wheel(tmp_path, symlink_package_file=asset)
+    _write_sdist(tmp_path)
+
+    result = _run_verifier(repo_root, tmp_path)
+
+    assert result.returncode != 0
+    assert f"must contain a regular file at {asset!r}" in result.stderr

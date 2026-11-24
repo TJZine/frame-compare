@@ -28,12 +28,14 @@ from frame_compare.config.schema_enums import (
     SourceMatchFpsMode,
     ToneCurve,
     TonemapPreset,
+    TonemapSpeed,
     ViewerMode,
     Visibility,
     VsScreenshotWriter,
 )
 from frame_compare.config.slowpics import validate_slowpics_title_template
-from frame_compare.config.text_validation import reject_control_characters
+from frame_compare.config.text_validation import reject_control_characters, reject_label_controls
+from frame_compare.utils.canvas import validate_canvas_size
 
 _EFFECTIVE_FPS_PATTERN = re.compile(r"^[0-9]+/[0-9]+$")
 
@@ -86,6 +88,19 @@ class AnalysisConfig(BaseModel):
     dark_quantile: float = Field(default=0.05, ge=0.0, le=0.5)
     bright_quantile: float = Field(default=0.95, ge=0.5, le=1.0)
 
+    @property
+    def generated_frame_count(self) -> int:
+        return (
+            self.random_frame_count
+            + self.dark_frame_count
+            + self.bright_frame_count
+            + self.motion_frame_count
+        )
+
+    @property
+    def requested_frame_count(self) -> int:
+        return len(self.user_frames) + self.generated_frame_count
+
     @field_validator("user_frames")
     @classmethod
     def validate_user_frames(cls, value: list[int]) -> list[int]:
@@ -95,13 +110,7 @@ class AnalysisConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_requested_frame_total(self) -> AnalysisConfig:
-        requested = (
-            len(self.user_frames)
-            + self.random_frame_count
-            + self.dark_frame_count
-            + self.bright_frame_count
-            + self.motion_frame_count
-        )
+        requested = self.requested_frame_count
         if requested == 0:
             raise ValueError("at least one analysis frame selector must request a frame")
         if requested > 100:
@@ -152,7 +161,7 @@ class SourceOverrideConfig(BaseModel):
     def validate_label(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        reject_control_characters(value, field_name="label")
+        reject_label_controls(value, field_name="label")
         normalized = value.strip()
         if not normalized:
             raise ValueError("label must not be empty")
@@ -194,6 +203,7 @@ class SourcesConfig(BaseModel):
     match_fps: SourceMatchFpsMode = SourceMatchFpsMode.DISABLED
     label_mode: Literal["stem", "filename", "parsed"] = "stem"
     label_parser: Literal["auto", "guessit", "anitopy"] = "auto"
+    scan_frame_geometry: bool = False
     overrides: dict[str, SourceOverrideConfig] = Field(default_factory=dict)
 
 
@@ -202,11 +212,9 @@ class ScreenshotsConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    use_ffmpeg: bool = False
     overlay_mode: OverlayMode = OverlayMode.STANDARD
     include_frame_number: bool = True
     png_compression: int = Field(default=6, ge=0, le=9)
-    ffmpeg_timeout_seconds: float = Field(default=30.0, ge=5.0)
     geometry_mode: ScreenshotGeometryMode = ScreenshotGeometryMode.NATIVE
     active_rect_detection: ScreenshotActiveRectDetection = ScreenshotActiveRectDetection.AUTO
     aligned_scale_policy: ScreenshotAlignedScalePolicy = ScreenshotAlignedScalePolicy.LARGEST_ACTIVE
@@ -219,14 +227,17 @@ class ScreenshotsConfig(BaseModel):
     def validate_aligned_target_dimension(cls, value: int | None) -> int | None:
         if value is None:
             return value
-        if value <= 0:
-            raise ValueError("aligned target dimensions must be positive")
+        validate_canvas_size(value, 1, label="Aligned target")
         if value % 2 != 0:
             raise ValueError("aligned target dimensions must be even")
         return value
 
     @model_validator(mode="after")
     def validate_aligned_target_policy(self) -> ScreenshotsConfig:
+        if self.aligned_target_width is not None and self.aligned_target_height is not None:
+            validate_canvas_size(
+                self.aligned_target_width, self.aligned_target_height, label="Aligned target"
+            )
         if self.geometry_mode != ScreenshotGeometryMode.ALIGNED:
             return self
 
@@ -255,6 +266,7 @@ class ColorConfig(BaseModel):
 
     enable_tonemap: bool = True
     preset: TonemapPreset = TonemapPreset.REFERENCE
+    tonemap_speed: TonemapSpeed = TonemapSpeed.QUALITY
     target_nits: int = Field(default=100, ge=100, le=1000)
     tone_curve: ToneCurve = ToneCurve.BT2390
     gamma_lift: bool = False
@@ -270,7 +282,7 @@ class SlowpicsConfig(BaseModel):
     confirm_upload_after_report: bool = False
     visibility: Visibility = Visibility.PUBLIC
     delete_after_upload: bool = False
-    timeout_seconds: float = Field(default=60.0, ge=10.0)
+    timeout_seconds: float = Field(default=60.0, ge=10.0, allow_inf_nan=False)
     max_retries: int = Field(default=3, ge=1, le=10)
     title: str = ""
     title_template: str = ""
@@ -279,7 +291,7 @@ class SlowpicsConfig(BaseModel):
     tmdb_id: Annotated[int, Field(strict=True, gt=0)] | None = None
     tmdb_media_type: Literal["movie", "tv"] | None = None
     remove_after_days: Annotated[int, Field(strict=True, ge=0, le=999999)] = 0
-    image_upload_timeout_seconds: float = Field(default=180.0, ge=10.0)
+    image_upload_timeout_seconds: float = Field(default=180.0, ge=10.0, allow_inf_nan=False)
     copy_url_to_clipboard: bool = True
     open_in_browser: bool = True
     create_url_shortcut: bool = True
@@ -320,7 +332,7 @@ class TmdbConfig(BaseModel):
     api_key: str | None = None
     enabled: bool = True
     unattended: bool = False
-    timeout_seconds: float = Field(default=10.0, ge=1.0)
+    timeout_seconds: float = Field(default=10.0, ge=1.0, allow_inf_nan=False)
     year_tolerance: int = Field(default=2, ge=0, le=5)
     category_preference: Literal["movie", "tv"] | None = None
 
