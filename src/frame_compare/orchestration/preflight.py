@@ -20,7 +20,6 @@ from frame_compare.orchestration.errors import (
 from frame_compare.utils.paths import require_managed_descendant
 from frame_compare.utils.types import WorkspacePaths
 
-# Canonical video patterns
 _VIDEO_PATTERNS: list[str] = ["*.mkv", "*.mp4", "*.avi", "*.m2ts", "*.ts"]
 
 

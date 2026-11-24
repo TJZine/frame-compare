@@ -21,6 +21,25 @@ def _run(
 
 
 @pytest.mark.e2e
+def test_write_config_preserves_omitted_flags(
+    run_cli: Callable[..., CommandResult],
+    workspace: Callable[..., Workspace],
+) -> None:
+    root = workspace(
+        {"slowpics": {"auto_upload": False}, "audio_alignment": {"force_interactive": True}}
+    )
+    _, result = _run(run_cli, root, ["run", "--write-config", "--seed", "17"])
+
+    assert result.exit_code == 0, result.stderr
+    saved = tomllib.loads(root.config_path.read_text(encoding="utf-8"))
+    assert saved["analysis"]["random_seed"] == 17
+    assert (saved["slowpics"]["auto_upload"], saved["audio_alignment"]["force_interactive"]) == (
+        False,
+        True,
+    )
+
+
+@pytest.mark.e2e
 def test_cli_config_and_preset_persistence(
     run_cli: Callable[..., CommandResult],
     workspace: Callable[..., Workspace],

@@ -39,8 +39,6 @@ from frame_compare.config.schema_sources import (
     TomlConfigSettingsSourceNoBOM,
 )
 
-# ─── Root Schema ───────────────────────────────────────────────────────────────
-
 
 class ConfigSchema(BaseSettings):
     """Root configuration schema using pydantic-settings.

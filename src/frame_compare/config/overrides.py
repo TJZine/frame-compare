@@ -50,14 +50,6 @@ CLI_OVERRIDE_MAP: dict[str, str] = {
     "input": "paths.input_dir",
 }
 
-_INVERTED_FLAGS: frozenset[str] = frozenset({"no_upload"})
-_FLAG_ONLY_OVERRIDES: frozenset[str] = frozenset(
-    {
-        "no_upload",
-        "force_interactive_alignment",
-    }
-)
-
 
 def apply_cli_overrides(
     config: ConfigSchema,
@@ -65,23 +57,17 @@ def apply_cli_overrides(
 ) -> ConfigSchema:
     """Apply CLI arguments as config overrides."""
     overrides: dict[str, object] = {}
-    cli_values = _cli_override_values(cli_args)
+    cli_values = _cli_option_values(cli_args)
     for cli_name, value in cli_values.items():
         if value is None:
             continue
 
-        # Flag-style booleans (default False) must not clobber config when omitted.
-        # Since Typer provides False even when not explicitly passed, treat only
-        # an explicit True as an override for these options.
-        if cli_name in _FLAG_ONLY_OVERRIDES and value is not True:
-            continue
-
-        if cli_name in _INVERTED_FLAGS:
-            value = not value
-
         _set_nested(overrides, CLI_OVERRIDE_MAP[cli_name], value)
 
+    if cli_args.no_upload is True:
+        _set_nested(overrides, CLI_OVERRIDE_MAP["no_upload"], False)
     if cli_args.force_interactive_alignment is True:
+        _set_nested(overrides, CLI_OVERRIDE_MAP["force_interactive_alignment"], True)
         _set_nested(overrides, "audio_alignment.use_vsview", True)
 
     if not overrides:
@@ -90,12 +76,10 @@ def apply_cli_overrides(
     base_dict = dump_config_with_explicit_color(config)
     merged = deep_merge(base_dict, overrides)
 
-    updated = validate_raw_config_payload(merged, redact_inputs=False)
-
-    return updated
+    return validate_raw_config_payload(merged, redact_inputs=False)
 
 
-def _cli_override_values(cli_args: CLIConfigOverrides) -> dict[str, object]:
+def _cli_option_values(cli_args: CLIConfigOverrides) -> dict[str, object]:
     return {
         "tm_preset": cli_args.tm_preset,
         "tm_speed": cli_args.tm_speed,
@@ -108,8 +92,6 @@ def _cli_override_values(cli_args: CLIConfigOverrides) -> dict[str, object]:
         "motion_frame_count": cli_args.motion_frame_count,
         "seed": cli_args.seed,
         "overlay": cli_args.overlay_mode,
-        "no_upload": cli_args.no_upload,
-        "force_interactive_alignment": cli_args.force_interactive_alignment,
         "input": str(cli_args.input_dir) if cli_args.input_dir is not None else None,
     }
 

@@ -24,12 +24,10 @@ if TYPE_CHECKING:
     )
 
 _EXPORTS: dict[str, tuple[str, str]] = {
-    # Coordinator
     "RunDependencies": ("frame_compare.orchestration.coordinator", "RunDependencies"),
     "RunRequest": ("frame_compare.orchestration.coordinator", "RunRequest"),
     "RunResult": ("frame_compare.orchestration.coordinator", "RunResult"),
     "execute_run": ("frame_compare.orchestration.coordinator", "execute_run"),
-    # Doctor
     "CheckResult": ("frame_compare.orchestration.doctor", "CheckResult"),
     "DoctorCheck": ("frame_compare.orchestration.doctor", "DoctorCheck"),
     "DoctorReport": ("frame_compare.orchestration.doctor", "DoctorReport"),

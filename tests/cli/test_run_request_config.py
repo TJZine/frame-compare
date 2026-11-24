@@ -116,24 +116,6 @@ def test_cli_and_runtime_share_the_complete_config_overrides() -> None:
             force_interactive_alignment=True,
         ),
     )
-    expected = CLIConfigOverrides(
-        input_dir=Path("external-input"),
-        tm_preset=TonemapPreset.SPLINE,
-        tm_speed=TonemapSpeed.FAST,
-        tm_target_nits=203,
-        tm_curve=ToneCurve.SPLINE,
-        user_frames=[3, 5],
-        random_frame_count=7,
-        dark_frame_count=2,
-        bright_frame_count=1,
-        motion_frame_count=4,
-        seed=19,
-        overlay_mode=OverlayMode.DIAGNOSTIC,
-        no_upload=True,
-        force_interactive_alignment=True,
-    )
-
-    assert options.config_overrides == expected
     request = build_run_request_from_cli(
         options,
         acquire_run_config(
@@ -143,16 +125,17 @@ def test_cli_and_runtime_share_the_complete_config_overrides() -> None:
             load_config_fn=lambda config_path=None, overrides=None: get_default_config(),
         ),
     )
-    assert request.inputs.config.analysis.user_frames == expected.user_frames
+    assert request.inputs.config.analysis.user_frames == [3, 5]
     assert request.inputs.config.slowpics.auto_upload is False
     assert (
         resolve_run_workspace(request.inputs).input_dir
-        == (options.root / (expected.input_dir or Path("comparison_videos"))).resolve()
+        == (options.root / "external-input").resolve()
     )
 
     config = request.inputs.config
     assert config.color.preset == TonemapPreset.SPLINE
     assert config.color.target_nits == 203
+    assert config.color.tonemap_speed is TonemapSpeed.FAST
     assert config.color.tone_curve == ToneCurve.SPLINE
     assert config.analysis.random_frame_count == 7
     assert config.analysis.dark_frame_count == 2
@@ -176,39 +159,24 @@ def test_cli_and_runtime_preserve_absent_and_explicit_empty_overrides() -> None:
         no_color=False,
         quiet=False,
         verbose=False,
-        config_overrides=CLIConfigOverrides(
-            input_dir=None,
-            no_upload=False,
-            tm_preset=None,
-            tm_target_nits=None,
-            tm_curve=None,
-            user_frames=[],
-            random_frame_count=None,
-            dark_frame_count=None,
-            bright_frame_count=None,
-            motion_frame_count=None,
-            seed=None,
-            overlay_mode=None,
-            force_interactive_alignment=False,
-        ),
+        config_overrides=CLIConfigOverrides(user_frames=[]),
     )
-    expected = CLIConfigOverrides(user_frames=[])
-
-    assert options.config_overrides == expected
+    config = get_default_config()
+    config.analysis.user_frames = [7]
     request = build_run_request_from_cli(
         options,
         acquire_run_config(
             root=options.root,
             config_path=options.config_path,
             overrides=options.config_overrides,
-            load_config_fn=lambda config_path=None, overrides=None: get_default_config(),
+            load_config_fn=lambda config_path=None, overrides=None: config,
         ),
     )
-    assert request.inputs.config.analysis.user_frames == expected.user_frames
+    assert request.inputs.config.analysis.user_frames == []
     assert request.inputs.config.slowpics.auto_upload is False
     assert (
         resolve_run_workspace(request.inputs).input_dir
-        == (options.root / (expected.input_dir or Path("comparison_videos"))).resolve()
+        == (options.root / "comparison_videos").resolve()
     )
 
 

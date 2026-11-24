@@ -40,7 +40,6 @@ from frame_compare.vs.runtime_contract import (
 __all__ = ["collect_checks"]
 
 
-# Canonical check ordering
 _CHECK_ORDER: list[tuple[str, str]] = [
     ("vapoursynth", "core"),
     ("lsmas", "core"),

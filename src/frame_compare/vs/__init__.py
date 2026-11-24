@@ -26,24 +26,18 @@ if TYPE_CHECKING:
 
 
 _EXPORTS: dict[str, tuple[str, str]] = {
-    # env
     "detect_plugins": ("frame_compare.vs.env", "detect_plugins"),
     "ensure_vs_environment": ("frame_compare.vs.env", "ensure_vs_environment"),
     "is_vapoursynth_available": ("frame_compare.vs.env", "is_vapoursynth_available"),
     "require_plugin": ("frame_compare.vs.env", "require_plugin"),
-    # loader
     "DefaultVSLoader": ("frame_compare.vs.loader", "DefaultVSLoader"),
     "VSLoader": ("frame_compare.vs.loader", "VSLoader"),
-    # props
     "detect_hdr": ("frame_compare.vs.props", "detect_hdr"),
-    # source
     "LWLibavSourceOptions": ("frame_compare.vs.source", "LWLibavSourceOptions"),
     "apply_trim": ("frame_compare.vs.source", "apply_trim"),
     "load_source": ("frame_compare.vs.source", "load_source"),
-    # tonemap
     "apply_tonemap": ("frame_compare.vs.tonemap", "apply_tonemap"),
     "get_preset_settings": ("frame_compare.vs.tonemap", "get_preset_settings"),
-    # types
     "HDRMetadata": ("frame_compare.vs.types", "HDRMetadata"),
     "SourceInfo": ("frame_compare.vs.types", "SourceInfo"),
     "AppliedTonemap": ("frame_compare.vs.types", "AppliedTonemap"),

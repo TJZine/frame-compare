@@ -172,7 +172,6 @@ def configure_logging(
         _stdlib_handler.close()
         _stdlib_handler = None
 
-    # Map level string to logging constant; fallback to INFO for unknown
     level_num = getattr(logging, level.upper(), logging.INFO)
 
     processors: list[structlog.typing.Processor] = [
