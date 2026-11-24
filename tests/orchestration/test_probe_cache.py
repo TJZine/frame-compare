@@ -1,7 +1,10 @@
 """Unit tests for probe cache keying logic and I/O."""
 
 import os
+from dataclasses import replace
 from pathlib import Path
+
+import pytest
 
 import frame_compare.orchestration.probing.probe_cache as probe_cache
 from frame_compare.orchestration.context import ClipFingerprint
@@ -11,21 +14,16 @@ from frame_compare.orchestration.probing.probe_cache import (
 
 
 def test_probe_cache_invalidates_on_fingerprint_change():
-    """Verify that changing any fingerprint field changes the key."""
-    base_fp = ClipFingerprint(Path("video.mkv"), 1024, 5000)
-    base_key = compute_probe_cache_key(base_fp)
+    original = ClipFingerprint(Path("video.mkv"), 1024, 5000, source_token="a" * 64)
+    original_key = compute_probe_cache_key(original)
+    assert compute_probe_cache_key(replace(original, path=Path("other.mkv"))) != original_key
+    assert compute_probe_cache_key(replace(original, size_bytes=2048)) != original_key
+    assert compute_probe_cache_key(replace(original, mtime_ns=6000)) != original_key
 
-    # Change path
-    fp_path = ClipFingerprint(Path("other.mkv"), 1024, 5000)
-    assert compute_probe_cache_key(fp_path) != base_key
 
-    # Change size
-    fp_size = ClipFingerprint(Path("video.mkv"), 2048, 5000)
-    assert compute_probe_cache_key(fp_size) != base_key
-
-    # Change mtime
-    fp_mtime = ClipFingerprint(Path("video.mkv"), 1024, 6000)
-    assert compute_probe_cache_key(fp_mtime) != base_key
+def test_stat_only_fingerprint_has_no_reusable_probe_key() -> None:
+    with pytest.raises(ValueError, match="live_probe_fingerprint"):
+        compute_probe_cache_key(ClipFingerprint(Path("video.mkv"), 1024, 5000))
 
 
 def test_live_probe_key_invalidates_same_size_and_mtime_replacement(tmp_path: Path) -> None:
@@ -45,7 +43,7 @@ def test_live_probe_key_invalidates_same_size_and_mtime_replacement(tmp_path: Pa
 
 
 def test_probe_cache_key_changes_with_scoped_runtime_fingerprint(monkeypatch) -> None:
-    fingerprint = ClipFingerprint(Path("video.mkv"), 1024, 5000)
+    fingerprint = ClipFingerprint(Path("video.mkv"), 1024, 5000, source_token="a" * 64)
     original = compute_probe_cache_key(fingerprint)
 
     observed_scopes: list[str] = []

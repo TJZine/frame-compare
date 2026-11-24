@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
-from tests.e2e.harness import ArtifactStep, CommandResult, Workspace, render_summary
+from tests.e2e.harness import ArtifactStep, CommandResult, Workspace, render_summary, run_command
 
 
 @pytest.mark.e2e
@@ -149,3 +150,70 @@ def test_media_cache_lifecycle(
         ),
     }
     record("M3-cache", root, steps, summary, expected, run_dir)
+
+
+@pytest.mark.e2e
+@pytest.mark.vs_required
+def test_benchmark_reads_prepared_probe_cache(
+    media_files: dict[str, Path],
+    run_cli: Callable[..., CommandResult],
+    workspace: Callable[..., Workspace],
+) -> None:
+    root = workspace(
+        {
+            "analysis": {"random_frame_count": 1, "min_window_seconds": 0},
+            "audio_alignment": {"enable": False},
+            "sources": {
+                "reference": "reference.mkv",
+                "overrides": {
+                    "comparison.mkv": {"effective_fps": "5/1"},
+                    "reference.mkv": {
+                        "trim_start_frames": 2,
+                        "trim_end_frames": 1,
+                        "effective_fps": "5/1",
+                    },
+                },
+            },
+            "screenshots": {"active_rect_detection": "aspect_ratio"},
+        }
+    )
+    sources = [root.input_dir / name for name in ("comparison.mkv", "reference.mkv")]
+    for source in sources:
+        shutil.copy2(media_files["sdr"], source)
+    prepare = run_cli(
+        root.root,
+        ["run", "--root", str(root.root), "--json", "--skip-metadata", "--no-upload"],
+        timeout=60,
+    )
+    assert prepare.exit_code == 0, (prepare.stdout, prepare.stderr)
+
+    benchmark = Path(__file__).resolve().parents[2] / "tools" / "benchmark_analysis_tiers.py"
+    arguments = [
+        str(benchmark),
+        "--root",
+        str(root.root),
+        "--output",
+        "benchmark.json",
+        "--repetitions",
+        "1",
+        "--skip-decode-baseline",
+        "--no-progress",
+        "--selection-domain",
+        "fixed-window-test",
+        *(str(path) for path in sources),
+    ]
+    completed = run_command(
+        Path(sys.executable), root.root, [*arguments, "--window-end-exclusive", "9"], timeout=60
+    )
+    assert completed.exit_code == 0, completed.stderr
+    report = json.loads((root.root / "benchmark.json").read_text())
+    assert report["config"]["analysis_source_path"] == str(sources[1])
+    assert report["config"]["effective_fps"] == "5"
+    assert report["config"]["selection_window"] == {"start_frame": 2, "end_frame_exclusive": 11}
+    assert report["quality"]["metadata"]["source_frame_count"] == 12
+
+    too_long = run_command(
+        Path(sys.executable), root.root, [*arguments, "--window-end-exclusive", "10"], timeout=30
+    )
+    assert too_long.exit_code != 0
+    assert "exceeds the selected prepared analysis frame count (9)" in too_long.stderr

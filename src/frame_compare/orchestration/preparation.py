@@ -50,6 +50,7 @@ from frame_compare.orchestration.probing.probe_cache import (
     compute_probe_cache_key,
     live_probe_fingerprint,
     load_clip_probe_cache,
+    load_prepared_probe_snapshots,
     merge_shared_clip_probe_cache,
     save_clip_probe_cache,
 )
@@ -306,24 +307,12 @@ def _cached_probe_snapshots_for_cache_only(
     workspace: WorkspacePaths,
     input_videos: list[Path],
 ) -> dict[Path, ClipProbeSnapshot]:
-    cache_path = _shared_probe_cache_path(workspace)
-    cached_entries = load_clip_probe_cache(cache_path)
-    entries_by_key = dict(cached_entries)
-    snapshots: dict[Path, ClipProbeSnapshot] = {}
-    for path in input_videos:
-        raise_if_cancelling()
-        fingerprint = live_probe_fingerprint(path).fingerprint
-        snapshot = (
-            entries_by_key.get(compute_probe_cache_key(fingerprint))
-            if fingerprint.source_token is not None
-            else None
+    snapshots = load_prepared_probe_snapshots(_shared_probe_cache_path(workspace), input_videos)
+    if snapshots is None:
+        raise AnalysisCacheMissError(
+            "Cached clip probe data is required to validate --from-cache-only "
+            "analysis cache for the configured selection domain."
         )
-        if snapshot is None:
-            raise AnalysisCacheMissError(
-                "Cached clip probe data is required to validate --from-cache-only "
-                "analysis cache for the configured selection domain."
-            )
-        snapshots[path] = snapshot
     return snapshots
 
 
@@ -345,10 +334,8 @@ def _persist_probe_snapshots_for_run(
     shared_cache_path = _shared_probe_cache_path(workspace)
 
     raise_if_cancelling()
-    # Run-local cache gets only this run's entries.
     save_clip_probe_cache(run_cache_path, current_entries)
 
-    # Shared cache merges current entries on top of any existing entries.
     raise_if_cancelling()
     merge_shared_clip_probe_cache(shared_cache_path, current_entries)
 
@@ -369,14 +356,13 @@ def _probe_input_videos(
 
     for path in input_videos:
         raise_if_cancelling()
-        fingerprint = live_probe_fingerprint(path).fingerprint
-        resolved_path = fingerprint.path
-        cache_key = compute_probe_cache_key(fingerprint)
-        snapshot = entries_by_key.get(cache_key) if fingerprint.source_token is not None else None
+        live = live_probe_fingerprint(path)
+        fingerprint = live.fingerprint
+        snapshot = live.find_snapshot(entries_by_key)
         if snapshot is None:
             if deps.vs_loader is None:
                 raise RuntimeError("VS loader must be initialized before probing clips.")
-            source_info = deps.vs_loader.load(resolved_path)
+            source_info = deps.vs_loader.load(fingerprint.path)
             preserved_props = compute_preserved_frame_props(source_info.frame_props)
             snapshot = ClipProbeSnapshot(
                 fingerprint=fingerprint,
@@ -389,7 +375,8 @@ def _probe_input_videos(
                 preserved_frame_props=preserved_props,
             )
             del source_info
-            entries_by_key[cache_key] = snapshot
+            if live.cache_key is not None:
+                entries_by_key[live.cache_key] = snapshot
 
         snapshots_by_path[path] = snapshot
 

@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 import tomllib
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from fractions import Fraction
 from math import isfinite
@@ -37,7 +37,7 @@ from frame_compare.utils.serialized_decode import SERIALIZED_DECODE_FAILURES
 from frame_compare.vs.errors import SourceLoadError
 from frame_compare.vs.props import parse_mastering_display_luminance
 from frame_compare.vs.runtime_contract import media_runtime_fingerprint
-from frame_compare.vs.source_admission import SourceAdmission, admit_source, source_identity
+from frame_compare.vs.source_admission import admit_source, source_identity
 from frame_compare.vs.types import HDRMetadata
 
 log = structlog.get_logger()
@@ -75,7 +75,10 @@ type _FramePropFloat = Annotated[_FiniteFloat, BeforeValidator(_reject_int_as_fl
 @dataclass(frozen=True)
 class LiveProbeFingerprint:
     fingerprint: ClipFingerprint
-    admission: SourceAdmission
+    cache_key: str | None
+
+    def find_snapshot(self, entries: Mapping[str, ClipProbeSnapshot]) -> ClipProbeSnapshot | None:
+        return None if self.cache_key is None else entries.get(self.cache_key)
 
 
 def live_probe_fingerprint(path: Path) -> LiveProbeFingerprint:
@@ -87,16 +90,17 @@ def live_probe_fingerprint(path: Path) -> LiveProbeFingerprint:
         try:
             identity = source_identity(resolved)
         except OSError:
-            # An admitted private source remains usable without persisted authority.
             identity = None
         if identity is not None and admission.geometry_probe_token is not None:
             payload = (asdict(identity), admission.geometry_probe_token)
             token = hashlib.sha256(
                 json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("ascii")
             ).hexdigest()
+        fingerprint = ClipFingerprint(
+            resolved, admission.stamp.size, admission.stamp.mtime_ns, token
+        )
         return LiveProbeFingerprint(
-            ClipFingerprint(resolved, admission.stamp.size, admission.stamp.mtime_ns, token),
-            admission,
+            fingerprint, compute_probe_cache_key(fingerprint) if token is not None else None
         )
     except (OSError, ValueError, FFmpegError, FFmpegNotFoundError) as error:
         raise SourceLoadError(path, str(error)) from error
@@ -205,6 +209,11 @@ def compute_probe_cache_key(fingerprint: ClipFingerprint) -> str:
     Serialization uses canonical JSON settings (sorted keys, no spaces)
     to ensure cross-platform determinism.
     """
+    if fingerprint.source_token is None:
+        raise ValueError(
+            "A reusable probe key requires a source token from live_probe_fingerprint()."
+        )
+
     payload: dict[str, Any] = {
         "path": str(fingerprint.path),
         "size_bytes": fingerprint.size_bytes,
@@ -277,6 +286,21 @@ def load_clip_probe_cache(cache_path: Path) -> dict[str, ClipProbeSnapshot]:
     return _load_clip_probe_cache(cache_path, abort_on_read_error=False)
 
 
+def load_prepared_probe_snapshots(
+    cache_path: Path, paths: Sequence[Path]
+) -> dict[Path, ClipProbeSnapshot] | None:
+    """Return snapshots only when every input has reusable probe data."""
+    entries = load_clip_probe_cache(cache_path)
+    snapshots: dict[Path, ClipProbeSnapshot] = {}
+    for path in paths:
+        raise_if_cancelling()
+        snapshot = live_probe_fingerprint(path).find_snapshot(entries)
+        if snapshot is None:
+            return None
+        snapshots[path] = snapshot
+    return snapshots
+
+
 def save_clip_probe_cache(
     cache_path: Path, entries_by_key: Mapping[str, ClipProbeSnapshot]
 ) -> None:
@@ -306,7 +330,6 @@ def save_clip_probe_cache(
             "preserved_frame_props": snapshot.preserved_frame_props,
         }
 
-        # TOML doesn't support None values, so we only include non-None fields
         if snapshot.is_hdr and snapshot.hdr_metadata:
             md = snapshot.hdr_metadata
             hdr_dict: dict[str, Any] = {

@@ -29,12 +29,6 @@ from frame_compare.config.loader import get_default_config
 from frame_compare.config.schema import AnalysisConfig
 from frame_compare.config.schema_enums import ScreenshotActiveRectDetection
 from frame_compare.config.schema_models import SourceOverrideConfig
-from frame_compare.orchestration.context import (
-    ClipActiveRect,
-    ClipFingerprint,
-    ClipProbeSnapshot,
-    ClipState,
-)
 
 
 def test_help_exposes_only_production_benchmark_options() -> None:
@@ -371,51 +365,6 @@ def test_run_tier_uses_prepared_reference_fps_for_selection(
     assert request.metric_frame_range == frame_range
     assert captured["selection_fps"] == Fraction(25)
     assert cast(FrameSelection, result["selection"]).frames == [7]
-
-
-def test_resolved_benchmark_source_preserves_prepared_fps_and_trim_facts(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    script = _load_script()
-    video = tmp_path / "clip.mkv"
-    video.write_bytes(b"video")
-    snapshot = ClipProbeSnapshot(
-        fingerprint=ClipFingerprint(path=video, size_bytes=5, mtime_ns=1),
-        width=1920,
-        height=1080,
-        num_frames=100,
-        fps=Fraction(24001, 1000),
-        is_hdr=False,
-    )
-    prepared = ClipState(
-        path=video,
-        label="clip",
-        probe=snapshot,
-        source_fps=Fraction(24),
-        effective_fps=Fraction(24),
-        active_rect=ClipActiveRect(
-            x=0,
-            y=0,
-            width=1920,
-            height=1080,
-            source="aspect-ratio-derived",
-            detection_mode="aspect_ratio",
-        ),
-    ).with_trim(trim_start_frames=7, trim_end_frame_inclusive=92)
-    monkeypatch.setattr(script, "_prepared_benchmark_clips", lambda **_kwargs: [prepared])
-
-    resolved = script._resolve_benchmark_analysis_source(
-        root=tmp_path,
-        input_dir=tmp_path,
-        input_paths=(video,),
-        config=get_default_config(),
-    )
-
-    assert resolved.effective_fps == Fraction(24)
-    assert resolved.reference_fps == Fraction(24)
-    assert resolved.trim_start_frames == 7
-    assert resolved.effective_frame_count == 86
-    assert resolved.source_frame_count == 100
 
 
 def test_sampling_json_records_exact_budget_and_bursts() -> None:
@@ -783,6 +732,8 @@ def test_nondefault_domain_requires_explicit_selection_token(tmp_path: Path) -> 
         effective_fps=Fraction(24),
         reference_fps=Fraction(24),
         effective_frame_count=20,
+        source_frame_count=20,
+        source_fps=Fraction(24),
         trim_start_frames=0,
         active_rect=script.BenchmarkActiveRect(
             rect=None,
@@ -810,6 +761,8 @@ def test_default_prepared_domain_accepts_prepared_effective_fps(tmp_path: Path) 
         effective_fps=Fraction(24),
         reference_fps=Fraction(24),
         effective_frame_count=20,
+        source_frame_count=20,
+        source_fps=Fraction(24),
         trim_start_frames=0,
         active_rect=script.BenchmarkActiveRect(
             rect=None,

@@ -68,15 +68,10 @@ from frame_compare.config.schema_enums import (
 from frame_compare.config.schema_models import SourceOverrideConfig
 from frame_compare.orchestration.context import (
     ACTIVE_RECT_RESOLUTION_ALGORITHM,
-    ClipFingerprint,
-    ClipProbeSnapshot,
     ClipState,
 )
 from frame_compare.orchestration.preflight import resolve_paths
-from frame_compare.orchestration.probing.probe_cache import (
-    compute_probe_cache_key,
-    load_clip_probe_cache,
-)
+from frame_compare.orchestration.probing.probe_cache import load_prepared_probe_snapshots
 from frame_compare.orchestration.selection_domain import (
     build_selection_domain_clips_with_diagnostics,
 )
@@ -136,14 +131,14 @@ class BenchmarkAnalysisSource:
 
     path: Path
     ordered_paths: tuple[Path, ...]
-    effective_fps: Fraction | None
-    reference_fps: Fraction | None
-    effective_frame_count: int | None
+    effective_fps: Fraction
+    reference_fps: Fraction
+    effective_frame_count: int
     trim_start_frames: int
     active_rect: BenchmarkActiveRect
     overrides_by_path: Mapping[Path, SourceOverrideConfig]
-    source_frame_count: int | None = None
-    source_fps: Fraction | None = None
+    source_frame_count: int
+    source_fps: Fraction
 
     @property
     def reference_path(self) -> Path:
@@ -164,33 +159,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         config_path=config_path,
     )
     config = load_config(config_path)
-    input_dir = _resolve_config_path(root, config.paths.input_dir)
-    cache_dir = args.cache_dir or (
-        _resolve_config_path(root, config.paths.generated_dir) / "cache" / "analysis"
-    )
+    workspace = resolve_paths(config, root)
+    cache_dir = args.cache_dir or workspace.shared_analysis_cache_dir
     if not cache_dir.is_absolute():
         cache_dir = root / cache_dir
 
     analysis_source = _resolve_benchmark_analysis_source(
-        root=root,
-        input_dir=input_dir,
+        cache_path=workspace.generated_root / "clip_probe.toml",
+        input_dir=workspace.input_dir,
         input_paths=input_paths,
         config=config,
     )
-    if analysis_source.source_frame_count is None:
-        raise SystemExit(
-            "An explicit production benchmark requires the selected source frame count "
-            "from generated/clip_probe.toml. Run the normal preparation path first."
-        )
-    if (
-        analysis_source.effective_fps is None
-        or analysis_source.reference_fps is None
-        or analysis_source.effective_frame_count is None
-    ):
-        raise SystemExit(
-            "An explicit production benchmark requires prepared FPS and trim facts. "
-            "Run the normal preparation path first."
-        )
     if args.window_end_exclusive > analysis_source.effective_frame_count:
         raise SystemExit(
             "--window-end-exclusive exceeds the selected prepared analysis frame count "
@@ -204,7 +183,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         active_rect_detection=config.screenshots.active_rect_detection,
     )
 
-    index_cache = ManagedSourceIndexCache(resolve_paths(config, root).generated_root)
+    index_cache = ManagedSourceIndexCache(workspace.generated_root)
     vs_loader = DefaultVSLoader(
         memory_limit_mb=config.runtime.memory_limit_mb, index_cache=index_cache
     )
@@ -268,11 +247,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "config_path": config_path.as_posix(),
             "analysis_source": config.sources.analysis_source,
             "analysis_source_path": analysis_source.path.as_posix(),
-            "effective_fps": (
-                None
-                if analysis_source.effective_fps is None
-                else str(analysis_source.effective_fps)
-            ),
+            "effective_fps": str(analysis_source.effective_fps),
             "metric_active_rect": _metric_active_rect_json(analysis_source.active_rect.rect),
             "active_rect_source": analysis_source.active_rect.source,
             "active_rect_detection_mode": analysis_source.active_rect.detection_mode,
@@ -1065,11 +1040,6 @@ def _git_output(root: Path, args: Sequence[str]) -> str | None:
     return None if output is None else output.strip()
 
 
-def _resolve_config_path(root: Path, configured_path: str) -> Path:
-    path = Path(configured_path)
-    return path if path.is_absolute() else root / path
-
-
 def _runtime_facts() -> JsonObject:
     facts: JsonObject = {
         "python": sys.version.split()[0],
@@ -1262,9 +1232,9 @@ class _FrameScan:
     frame_count: int = 0
     keyframe_count: int = 0
     previous_keyframe: int | None = None
-    types: Counter[str] = field(default_factory=Counter)
-    gaps: Counter[int] = field(default_factory=Counter)
-    observed_timestamps: list[float] = field(default_factory=list)
+    types: Counter[str] = field(default_factory=Counter[str])
+    gaps: Counter[int] = field(default_factory=Counter[int])
+    observed_timestamps: list[float] = field(default_factory=list[float])
 
     def feed(self, chunk: bytes) -> None:
         rows = (self.pending + chunk).split(b"\n")
@@ -1389,9 +1359,9 @@ def _run_decode_baseline(*, analysis_source_path: Path, vs_loader: DefaultVSLoad
     }
 
 
-def _resolve_benchmark_analysis_source_path(
-    *, input_dir: Path, input_paths: Sequence[Path], config: ConfigSchema
-) -> Path:
+def _resolve_benchmark_analysis_source(
+    *, cache_path: Path, input_dir: Path, input_paths: Sequence[Path], config: ConfigSchema
+) -> BenchmarkAnalysisSource:
     if config.sources.analysis_source == "fastest":
         raise SystemExit("Benchmarking requires an explicit analysis source, not 'fastest'.")
     if config.sources.match_fps != SourceMatchFpsMode.DISABLED:
@@ -1399,109 +1369,51 @@ def _resolve_benchmark_analysis_source_path(
     selection = resolve_source_selection(
         input_dir=input_dir, discovered_paths=list(input_paths), config=config.sources
     )
-    if config.sources.analysis_source == "reference":
-        return selection.ordered_paths[0]
-    return resolve_source_selector(
-        selector=config.sources.analysis_source,
-        input_dir=input_dir,
-        paths=selection.ordered_paths,
-        role="sources.analysis_source",
-    )
-
-
-def _resolve_benchmark_analysis_source(
-    *, root: Path, input_dir: Path, input_paths: Sequence[Path], config: ConfigSchema
-) -> BenchmarkAnalysisSource:
-    path = _resolve_benchmark_analysis_source_path(
-        input_dir=input_dir, input_paths=input_paths, config=config
-    )
-    selection = resolve_source_selection(
-        input_dir=input_dir, discovered_paths=list(input_paths), config=config.sources
-    )
-    override = selection.overrides_by_path.get(path)
-    prepared_clips = _prepared_benchmark_clips(
-        root=root,
-        input_paths=selection.ordered_paths,
-        config=config,
-        overrides_by_path=selection.overrides_by_path,
-    )
-    prepared_analysis = None
-    reference_fps = None
-    if prepared_clips is not None:
-        prepared_analysis = next(clip for clip in prepared_clips if clip.path == path)
-        reference_fps = prepared_clips[0].effective_fps
-    return BenchmarkAnalysisSource(
-        path=path,
-        ordered_paths=tuple(selection.ordered_paths),
-        effective_fps=None if prepared_analysis is None else prepared_analysis.effective_fps,
-        reference_fps=reference_fps,
-        effective_frame_count=(
-            None if prepared_analysis is None else prepared_analysis.effective_num_frames()
-        ),
-        trim_start_frames=(
-            0 if prepared_analysis is None else prepared_analysis.trim.trim_start_frames
-        ),
-        active_rect=_benchmark_active_rect_from_prepared_clip(
-            source_path=path,
-            override=override,
-            prepared_clip=prepared_analysis,
-            config=config,
-        ),
-        overrides_by_path=selection.overrides_by_path,
-        source_frame_count=(
-            None if prepared_analysis is None else prepared_analysis.probe.num_frames
-        ),
-        source_fps=(None if prepared_analysis is None else prepared_analysis.probe.fps),
-    )
-
-
-def _prepared_benchmark_clips(
-    *,
-    root: Path,
-    input_paths: Sequence[Path],
-    config: ConfigSchema,
-    overrides_by_path: dict[Path, SourceOverrideConfig],
-) -> list[ClipState] | None:
-    cache = _resolve_config_path(root, config.paths.generated_dir) / "clip_probe.toml"
-    entries = dict(load_clip_probe_cache(cache))
-    snapshots: dict[Path, ClipProbeSnapshot] = {}
-    for path in input_paths:
-        stat = path.stat()
-        key = compute_probe_cache_key(
-            ClipFingerprint(path=path, size_bytes=stat.st_size, mtime_ns=stat.st_mtime_ns)
+    path = (
+        selection.ordered_paths[0]
+        if config.sources.analysis_source == "reference"
+        else resolve_source_selector(
+            selector=config.sources.analysis_source,
+            input_dir=input_dir,
+            paths=selection.ordered_paths,
+            role="sources.analysis_source",
         )
-        snapshot = entries.get(key)
-        if snapshot is None:
-            return None
-        snapshots[path] = snapshot
+    )
+    snapshots = load_prepared_probe_snapshots(cache_path, selection.ordered_paths)
+    if snapshots is None:
+        raise SystemExit(
+            f"Prepared clip probe data is missing or stale in {cache_path}. "
+            "Run the normal preparation path first."
+        )
     result = build_selection_domain_clips_with_diagnostics(
-        ordered_paths=list(input_paths),
+        ordered_paths=selection.ordered_paths,
         snapshots_by_path=snapshots,
-        overrides_by_path=overrides_by_path,
-        labels_by_path={path: path.stem for path in input_paths},
+        overrides_by_path=selection.overrides_by_path,
+        labels_by_path={path: path.stem for path in selection.ordered_paths},
         match_fps=config.sources.match_fps,
         active_rect_detection=config.screenshots.active_rect_detection,
     )
-    return result.clips
+    prepared = next(clip for clip in result.clips if clip.path == path)
+    return BenchmarkAnalysisSource(
+        path=path,
+        ordered_paths=tuple(selection.ordered_paths),
+        effective_fps=prepared.effective_fps,
+        reference_fps=result.clips[0].effective_fps,
+        effective_frame_count=prepared.effective_num_frames(),
+        trim_start_frames=prepared.trim.trim_start_frames,
+        active_rect=_benchmark_active_rect_from_prepared_clip(prepared, config),
+        overrides_by_path=selection.overrides_by_path,
+        source_frame_count=prepared.probe.num_frames,
+        source_fps=prepared.probe.fps,
+    )
 
 
 def _benchmark_active_rect_from_prepared_clip(
-    *,
-    source_path: Path,
-    override: SourceOverrideConfig | None,
-    prepared_clip: ClipState | None,
-    config: ConfigSchema,
+    prepared_clip: ClipState, config: ConfigSchema
 ) -> BenchmarkActiveRect:
-    if override is not None and override.active_rect is not None:
-        rect = override.active_rect
-        return BenchmarkActiveRect(
-            rect=MetricActiveRect(rect.x, rect.y, rect.width, rect.height),
-            source="explicit",
-            detection_mode=config.screenshots.active_rect_detection.value,
-        )
-    if prepared_clip is None or prepared_clip.active_rect is None:
+    if prepared_clip.active_rect is None:
         raise SystemExit(
-            f"Prepared active-rectangle data for {source_path.name} is missing. "
+            f"Prepared active-rectangle data for {prepared_clip.path.name} is missing. "
             "Run the normal preparation path first."
         )
     prepared = prepared_clip.active_rect
