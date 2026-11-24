@@ -37,6 +37,7 @@ from frame_compare.vsview.alignment_review_contract import (
     KeepCurrentAlignmentReviewDecision,
     write_alignment_review_result,
 )
+from tests.alignment_review_test_support import provisional_audio_attempt
 from tests.services.alignment_request_test_support import (
     alignment_request,
 )
@@ -48,7 +49,6 @@ from tests.services.alignment_resolution_test_support import (
     save_resolutions,
     trusted_computed_result,
 )
-from tests.services.test_alignment_diagnostics import audio_attempt
 
 
 def align_clips_from_request(
@@ -129,7 +129,7 @@ def test_manual_zero_preserves_rejected_attempt_and_diagnostic_digest(
     capsys: pytest.CaptureFixture[str],
     previous_offsets: str,
 ) -> None:
-    attempt = audio_attempt()
+    attempt = provisional_audio_attempt(frame_offset=0, chunk_count=5)
     unapplied = AlignmentResult(
         reference_clip="ref.mkv",
         comparison_clip="comparison.mkv",
