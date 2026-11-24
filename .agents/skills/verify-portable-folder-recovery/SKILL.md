@@ -40,16 +40,18 @@ separate platform tests in the same module.
 
 ## Confirm correspondence
 
-Last checked against `cb473653601bc7a1c0ce1aec105e6eb150ee0134`.
+On the base branch, find the last verification update with
+`git log -1 --format=%H -- .agents/skills/verify-portable-folder-recovery/SKILL.md`.
 Inspect `Get-PortableUserFolderState`, `Get-PortableMigrationLocation`,
 `Invoke-PortableActivation` and `Write-PendingMigrationRefusal` in the
 [activation script](../../../tools/windows_portable/portable_activation.ps1)
 when the folder domain, rename sequence or marker lifetime changes. Establish
 whether a new counterexample violates the recovery contract or exposes a new
-legitimate transition. Update the model and sync commit after reconciling the
+legitimate transition. Update the model and its coverage here after reconciling the
 implementation with that contract.
 
-To replay the historical failure, in a disposable worktree of this revision use
+Fetch the historical installer with `git fetch origin refs/pull/188/head`.
+In a disposable worktree of the revision under test, use
 `git restore --source=7d39e5fb -- tools/windows_portable/portable_activation.ps1`
 and run the folder model. In the absent-source, empty-target case the old
 transaction moved an empty directory back and discarded the marker. Restore the
