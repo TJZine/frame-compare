@@ -54,6 +54,7 @@ from tests.orchestration.phase_task_helpers import (
     _render_artifacts,
     prep_for_context,
 )
+from tests.public_media_examples import OWL
 from tests.render_test_support import paths_by_label
 from tests.run_request_support import make_run_request
 from tests.services.report_viewer_contracts import SelectParser, script_payload
@@ -350,12 +351,12 @@ def test_report_display_uses_middot_while_slowpics_upload_names_keep_pipe(
         assert " · " not in upload_clip.image_name
 
 
-def test_report_captions_use_short_names_for_real_audit_filenames(tmp_path: Path) -> None:
+def test_report_captions_use_short_names_for_example_releases(tmp_path: Path) -> None:
     ctx = _context(tmp_path)
     paths = [
         ctx.workspace.input_dir / name
         for name in (
-            "Amber.Reach.S02E05.1080p.Bluray.DD5.1.x264-OwL.mkv",
+            OWL,
             "Constructed.LanternMoth-Wagtail.english-dub-only.mkv",
             "Constructed.LanternMoth-Wagtail.english-dub-only-copy.mkv",
         )

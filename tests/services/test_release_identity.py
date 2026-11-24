@@ -18,6 +18,7 @@ from frame_compare.services.release_identity import (
     unique_presentation_names,
 )
 from frame_compare.services.types import ParsedMetadata
+from tests.public_media_examples import EGRET, HERON, OWL
 
 
 @pytest.mark.parametrize(
@@ -405,9 +406,6 @@ def test_short_names(sources: list[ShortNameSource], expected: list[str]) -> Non
     assert short_source_names(sources) == expected
 
 
-_OWL = "Amber.Reach.S02E05.1080p.Bluray.DD5.1.x264-OwL.mkv"
-_HERON = "Amber.Reach.S02E05.Tide.1080p.AMZN.WEB-DL.DDP.5.1.H.264-HERON.mkv"
-_EGRET = "Amber.Reach.S02E05.Tide.1080p.BluRay.REMUX.AVC.DTS-HD.MA.5.1-EGRET.mkv"
 _DUB = "Constructed.LanternMoth-Wagtail.english-dub-only.mkv"
 _DUB_COPY = "Constructed.LanternMoth-Wagtail.english-dub-only-copy.mkv"
 
@@ -416,7 +414,7 @@ _DUB_COPY = "Constructed.LanternMoth-Wagtail.english-dub-only-copy.mkv"
     ("filenames", "expected", "long_labels"),
     [
         (
-            [_OWL, _HERON, _EGRET],
+            [OWL, HERON, EGRET],
             ["OwL", "HERON", "EGRET"],
             [
                 "Amber Reach S02E05 · 1080p · BluRay · OwL",
@@ -425,7 +423,7 @@ _DUB_COPY = "Constructed.LanternMoth-Wagtail.english-dub-only-copy.mkv"
             ],
         ),
         (
-            [_OWL, _DUB],
+            [OWL, _DUB],
             ["OwL", "english-dub-only"],
             [
                 "Amber Reach S02E05 · 1080p · BluRay · OwL",
@@ -433,7 +431,7 @@ _DUB_COPY = "Constructed.LanternMoth-Wagtail.english-dub-only-copy.mkv"
             ],
         ),
         (
-            [_OWL, _DUB_COPY, _DUB],
+            [OWL, _DUB_COPY, _DUB],
             ["OwL", "english-dub-only-copy", "english-dub-only"],
             [
                 "Amber Reach S02E05 · 1080p · BluRay · OwL",
