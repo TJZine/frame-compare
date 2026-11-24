@@ -101,7 +101,7 @@ the current runbook's applicable gates; do not run every route on every edit.
 
 | Purpose | Command |
 | --- | --- |
-| Type analysis (application, tests, and analysis tier benchmark) | `uv run --no-sync pyright --warnings` |
+| Type analysis (application, tests, alignment and analysis tier benchmarks, and `scripts/check_*.py` checks) | `uv run --no-sync pyright --warnings` |
 | Lint | `uv run --no-sync ruff check .` |
 | Formatting | `uv run --no-sync ruff format --check .` |
 | Maintained Python security gate | `bash tools/check_python_security.sh` |

@@ -94,7 +94,13 @@ dev = [
 pythonVersion = "3.13"
 pythonPlatform = "All"
 typeCheckingMode = "strict"
-include = ["src", "tests", "tools/benchmark_analysis_tiers.py"]
+include = [
+    "src",
+    "tests",
+    "tools/alignment_benchmark.py",
+    "tools/benchmark_analysis_tiers.py",
+    "scripts/check_*.py",
+]
 exclude = ["**/__pycache__", ".venv", "build", "dist"]
 venvPath = "."
 venv = ".venv"
