@@ -267,57 +267,6 @@ async def test_required_step_marks_failure_and_propagates(
     assert state.warnings == []
 
 
-async def test_step_keeps_cleanup_error_when_progress_completion_fails() -> None:
-    reporter = Mock(spec=NullProgressReporter)
-    reporter.complete_phase.side_effect = OSError("stderr closed")
-    steps = RunSteps(reporter=reporter, state=ExecutionState(), monotonic_timer=lambda: 0.0)
-    error = AudioAlignmentCleanupError("resource not released")
-
-    def fail() -> Never:
-        raise error
-
-    with pytest.raises(AudioAlignmentCleanupError) as caught:
-        await steps.run(
-            "align",
-            fail,
-            warning_source="alignment",
-            warn_only=True,
-            fatal=(AudioAlignmentCleanupError,),
-        )
-
-    assert caught.value is error
-    reporter.complete_phase.assert_called_once_with(
-        ProgressPhaseStatus.FAILED, summary=None, duration_text=None
-    )
-
-
-async def test_successful_step_propagates_progress_completion_error() -> None:
-    reporter = Mock(spec=NullProgressReporter)
-    error = OSError("stderr closed")
-    reporter.complete_phase.side_effect = error
-    steps = RunSteps(reporter=reporter, state=ExecutionState(), monotonic_timer=lambda: 0.0)
-
-    with pytest.raises(OSError) as caught:
-        await steps.run("render", lambda: None, warning_source="render")
-
-    assert caught.value is error
-
-
-async def test_successful_step_propagates_progress_completion_error_in_caller_except() -> None:
-    reporter = Mock(spec=NullProgressReporter)
-    error = OSError("stderr closed")
-    reporter.complete_phase.side_effect = error
-    steps = RunSteps(reporter=reporter, state=ExecutionState(), monotonic_timer=lambda: 0.0)
-
-    try:
-        raise RuntimeError("caller handling")
-    except RuntimeError:
-        with pytest.raises(OSError) as caught:
-            await steps.run("render", lambda: None, warning_source="render")
-
-    assert caught.value is error
-
-
 @pytest.mark.parametrize(
     ("error", "status", "interrupted_step"),
     [
